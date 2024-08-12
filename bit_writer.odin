@@ -545,3 +545,134 @@ test_read_bits_after_full_read :: proc(t: ^testing.T) {
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 0)
 }
+
+@(test)
+test_write_then_read_simple :: proc(t: ^testing.T) {
+	buffer := make([]u32, 2)
+	defer delete(buffer)
+
+	writer := create_writer(buffer)
+	success := write_bits(&writer, 0b1010, 4)
+	testing.expect(t, success)
+	success = write_bits(&writer, 0b11110000, 8)
+	testing.expect(t, success)
+	success = final_flush_to_memory(&writer)
+	testing.expect(t, success)
+
+	reader := create_reader(buffer[:])
+	value, read_success := read_bits(&reader, 4)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0b1010)
+
+	value, read_success = read_bits(&reader, 8)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0b11110000)
+}
+
+@(test)
+test_write_then_read_full_word :: proc(t: ^testing.T) {
+	buffer := make([]u32, 1)
+	defer delete(buffer)
+
+	writer := create_writer(buffer)
+	success := write_bits(&writer, 0xAABB_CCDD, 32)
+	testing.expect(t, success)
+	success = final_flush_to_memory(&writer)
+	testing.expect(t, success)
+
+	reader := create_reader(buffer[:])
+	value, read_success := read_bits(&reader, 32)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0xAABB_CCDD)
+}
+
+@(test)
+test_write_then_read_across_word_boundary :: proc(t: ^testing.T) {
+	buffer := make([]u32, 2)
+	defer delete(buffer)
+
+	writer := create_writer(buffer)
+	success := write_bits(&writer, 0xFFFF, 16)
+	testing.expect(t, success)
+	success = write_bits(&writer, 0xAAAA, 16)
+	testing.expect(t, success)
+	success = write_bits(&writer, 0xBBBB, 16)
+	testing.expect(t, success)
+	success = final_flush_to_memory(&writer)
+	testing.expect(t, success)
+
+	reader := create_reader(buffer[:])
+	value, read_success := read_bits(&reader, 16)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0xFFFF)
+
+	value, read_success = read_bits(&reader, 16)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0xAAAA)
+
+	value, read_success = read_bits(&reader, 16)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0xBBBB)
+}
+
+@(test)
+test_write_then_read_mixed_bit_lengths :: proc(t: ^testing.T) {
+	buffer := make([]u32, 2)
+	defer delete(buffer)
+
+	writer := create_writer(buffer)
+	success := write_bits(&writer, 0b1, 1)
+	testing.expect(t, success)
+	success = write_bits(&writer, 0b1010, 4)
+	testing.expect(t, success)
+	success = write_bits(&writer, 0xFF, 8)
+	testing.expect(t, success)
+	success = write_bits(&writer, 0xABCD, 16)
+	testing.expect(t, success)
+	success = final_flush_to_memory(&writer)
+	testing.expect(t, success)
+
+	reader := create_reader(buffer[:])
+	value, read_success := read_bits(&reader, 1)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0b1)
+
+	value, read_success = read_bits(&reader, 4)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0b1010)
+
+	value, read_success = read_bits(&reader, 8)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0xFF)
+
+	value, read_success = read_bits(&reader, 16)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0xABCD)
+}
+
+@(test)
+test_write_then_read_full_buffer :: proc(t: ^testing.T) {
+	buffer := make([]u32, 2)
+	defer delete(buffer)
+
+	writer := create_writer(buffer)
+	success := write_bits(&writer, 0xFFFF_FFFF, 32)
+	testing.expect(t, success)
+	success = write_bits(&writer, 0xAAAA_AAAA, 32)
+	testing.expect(t, success)
+	success = final_flush_to_memory(&writer)
+	testing.expect(t, success)
+
+	reader := create_reader(buffer[:])
+	value, read_success := read_bits(&reader, 32)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0xFFFF_FFFF)
+
+	value, read_success = read_bits(&reader, 32)
+	testing.expect(t, read_success)
+	testing.expect_value(t, value, 0xAAAA_AAAA)
+
+	// Try to read one more bit, which should fail
+	_, read_success = read_bits(&reader, 1)
+	testing.expect(t, !read_success)
+}
