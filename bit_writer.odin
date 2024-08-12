@@ -17,6 +17,10 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 	// Asserting for debugging, probably remove when stable
 	assert(bits >= 0 && bits <= 32)
 
+	if bits == 0 {
+		return true
+	}
+
 	if bits < 0 || bits > 32 {
 		return false
 	}
@@ -70,8 +74,7 @@ final_flush_to_memory :: proc(writer: ^BitWriter) -> bool {
 	return true
 }
 
-create_writer :: proc(num_words: u32) -> BitWriter {
-	buffer := make([]u32, num_words)
+create_writer :: proc(buffer: []u32) -> BitWriter {
 	bit_writer := BitWriter {
 		buffer       = buffer,
 		scratch      = 0,
@@ -79,10 +82,6 @@ create_writer :: proc(num_words: u32) -> BitWriter {
 		word_index   = 0,
 	}
 	return bit_writer
-}
-
-destroy_writer :: proc(writer: ^BitWriter) {
-	delete(writer.buffer)
 }
 
 BitReader :: struct {
@@ -94,23 +93,17 @@ BitReader :: struct {
 	word_index:    u32,
 }
 
-create_reader :: proc(num_words: u32) -> BitReader {
-	buffer := make([]u32, num_words)
+create_reader :: proc(buffer: []u32) -> BitReader {
 	bit_reader := BitReader {
 		buffer        = buffer,
 		scratch       = 0,
 		scratch_bits  = 0,
-		total_bits    = num_words * 32,
+		total_bits    = u32(len(buffer) * 32),
 		num_bits_read = 0,
 		word_index    = 0,
 	}
 	return bit_reader
 }
-
-destroy_reader :: proc(reader: ^BitReader) {
-	delete(reader.buffer)
-}
-
 
 read_bits :: proc(
 	reader: ^BitReader,
@@ -119,26 +112,48 @@ read_bits :: proc(
 	value: u32,
 	success: bool,
 ) {
-	// NOTE(Thomas): 
-	// Asserting for debugging, probably remove when stable
-	assert(bits >= 0 && bits <= 32)
+	if bits == 0 {
+		return 0, true
+	}
 
 	if bits < 0 || bits > 32 {
 		return 0, false
 	}
 
-	if reader.word_index >= u32(len(reader.buffer)) {
+	if bits > 32 || reader.num_bits_read + bits > reader.total_bits {
 		return 0, false
 	}
 
+	if reader.word_index > u32(len(reader.buffer)) {
+		return 0, false
+	}
 
-	return 0, true
+	// Ensure we have enough bits in the scratch
+	if reader.scratch_bits < bits {
+		// Read in a new word if we've exhausted the current one
+		reader.scratch |=
+			u64(reader.buffer[reader.word_index]) << reader.scratch_bits
+		reader.scratch_bits += 32
+		reader.word_index += 1
+	}
+
+	// Read the bits
+	mask := u64((1 << bits) - 1)
+	value = u32(reader.scratch & mask)
+
+	// Update the scratch
+	reader.scratch >>= bits
+	reader.scratch_bits -= bits
+	reader.num_bits_read += bits
+
+	return value, true
 }
 
 @(test)
 test_write_zero_and_zero_bits :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0, 0)
 
@@ -151,8 +166,9 @@ test_write_zero_and_zero_bits :: proc(t: ^testing.T) {
 
 @(test)
 test_write_single_bit :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 1, 1)
 	testing.expect(t, res)
@@ -163,53 +179,57 @@ test_write_single_bit :: proc(t: ^testing.T) {
 
 @(test)
 test_write_full_word :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
-	res := write_bits(&writer, 0xFFFFFFFF, 32)
+	res := write_bits(&writer, 0xFFFF_FFFF, 32)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.word_index, 1)
-	testing.expect_value(t, writer.buffer[0], 0xFFFFFFFF)
+	testing.expect_value(t, writer.buffer[0], 0xFFFF_FFFF)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
 }
 
 @(test)
 test_write_across_word_boundary :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0xFFFF, 16)
 	testing.expect(t, res)
 	res = write_bits(&writer, 0xFFFF, 16)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.word_index, 1)
-	testing.expect_value(t, writer.buffer[0], 0xFFFFFFFF)
+	testing.expect_value(t, writer.buffer[0], 0xFFFF_FFFF)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
 }
 
 @(test)
 test_write_multiple_words :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
 	for i in 0 ..< 3 {
-		res := write_bits(&writer, 0xFFFFFFFF, 32)
+		res := write_bits(&writer, 0xFFFF_FFFF, 32)
 		testing.expect(t, res)
 	}
 	testing.expect_value(t, writer.word_index, 3)
-	testing.expect_value(t, writer.buffer[0], 0xFFFFFFFF)
-	testing.expect_value(t, writer.buffer[1], 0xFFFFFFFF)
-	testing.expect_value(t, writer.buffer[2], 0xFFFFFFFF)
+	testing.expect_value(t, writer.buffer[0], 0xFFFF_FFFF)
+	testing.expect_value(t, writer.buffer[1], 0xFFFF_FFFF)
+	testing.expect_value(t, writer.buffer[2], 0xFFFF_FFFF)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
 }
 
 @(test)
 test_write_partial_bits :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0b101, 3)
 	testing.expect(t, res)
@@ -222,8 +242,9 @@ test_write_partial_bits :: proc(t: ^testing.T) {
 
 @(test)
 test_overflow_protection :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
 	for i in 0 ..< len(writer.buffer) {
 		res := write_bits(&writer, 0xFFFFFFFF, 32)
@@ -245,10 +266,11 @@ test_overflow_protection :: proc(t: ^testing.T) {
 
 @(test)
 test_write_zero_bits :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
-	res := write_bits(&writer, 0xFFFFFFFF, 0)
+	res := write_bits(&writer, 0xFFFF_FFFF, 0)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.word_index, 0)
 	testing.expect_value(t, writer.scratch, 0)
@@ -257,8 +279,9 @@ test_write_zero_bits :: proc(t: ^testing.T) {
 
 @(test)
 test_write_mixed_bit_lengths :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0b1, 1)
 	testing.expect(t, res)
@@ -273,8 +296,9 @@ test_write_mixed_bit_lengths :: proc(t: ^testing.T) {
 
 @(test)
 test_write_flush :: proc(t: ^testing.T) {
-	writer := create_writer(100)
-	defer destroy_writer(&writer)
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0xFFFF_FFFF, 32)
 	testing.expect(t, res)
@@ -288,4 +312,207 @@ test_write_flush :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
 	testing.expect_value(t, writer.word_index, 2)
+}
+
+@(test)
+test_read_zero_bits :: proc(t: ^testing.T) {
+	buffer := []u32{0xFFFF_FFFF}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 0)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0)
+	testing.expect_value(t, reader.num_bits_read, 0)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 0)
+}
+
+@(test)
+test_read_single_bit :: proc(t: ^testing.T) {
+	buffer := []u32{0x0000_0001}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 1)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 1)
+	testing.expect_value(t, reader.num_bits_read, 1)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 31)
+}
+
+@(test)
+test_read_full_word :: proc(t: ^testing.T) {
+	buffer := []u32{0xFFFF_FFFF}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 32)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0xFFFF_FFFF)
+	testing.expect_value(t, reader.num_bits_read, 32)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 0)
+}
+
+@(test)
+test_read_across_word_boundary :: proc(t: ^testing.T) {
+	buffer := []u32{0xFFFF_0000, 0x0000_FFFF}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 16)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0x0000)
+	testing.expect_value(t, reader.scratch, 0x0000_FFFF)
+	testing.expect_value(t, reader.scratch_bits, 16)
+
+	value, success = read_bits(&reader, 16)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0xFFFF)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 0)
+
+	value, success = read_bits(&reader, 16)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0xFFFF)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 16)
+
+	testing.expect_value(t, reader.num_bits_read, 48)
+}
+
+@(test)
+test_read_partial_bits :: proc(t: ^testing.T) {
+	buffer := []u32{0b11111101}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 3)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0b101)
+	testing.expect_value(t, reader.scratch, 0b11111)
+	testing.expect_value(t, reader.scratch_bits, 29)
+
+	value, success = read_bits(&reader, 5)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0b11111)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 24)
+
+	testing.expect_value(t, reader.num_bits_read, 8)
+}
+
+@(test)
+test_read_overflow_protection :: proc(t: ^testing.T) {
+	buffer := []u32{0xFFFF_FFFF}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 32)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0xFFFF_FFFF)
+
+	// This should fail as we've read all available bits
+	value, success = read_bits(&reader, 1)
+	testing.expect(t, !success)
+	testing.expect_value(t, reader.num_bits_read, 32)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 0)
+}
+
+@(test)
+test_read_mixed_bit_lengths :: proc(t: ^testing.T) {
+	buffer := []u32{0b11111111_1010_1}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 1)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0b1)
+	testing.expect_value(t, reader.scratch, 0b11111111_1010)
+	testing.expect_value(t, reader.scratch_bits, 31)
+
+	value, success = read_bits(&reader, 4)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0b1010)
+	testing.expect_value(t, reader.scratch, 0b11111111)
+	testing.expect_value(t, reader.scratch_bits, 27)
+
+	value, success = read_bits(&reader, 8)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0b11111111)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 19)
+
+	testing.expect_value(t, reader.num_bits_read, 13)
+}
+
+@(test)
+test_read_exact_buffer_size :: proc(t: ^testing.T) {
+	buffer := []u32{0xAAAA_AAAA, 0xBBBB_BBBB}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 32)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0xAAAA_AAAA)
+
+	value, success = read_bits(&reader, 32)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0xBBBB_BBBB)
+
+	value, success = read_bits(&reader, 1)
+	testing.expect(t, !success)
+	testing.expect_value(t, reader.num_bits_read, 64)
+}
+
+@(test)
+test_read_large_bit_count :: proc(t: ^testing.T) {
+	buffer := []u32{0xAAAA_AAAA, 0xBBBB_BBBB}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 33)
+	testing.expect(t, !success)
+	testing.expect_value(t, reader.num_bits_read, 0)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 0)
+}
+
+@(test)
+test_read_empty_buffer :: proc(t: ^testing.T) {
+	buffer := []u32{}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 1)
+	testing.expect(t, !success)
+	testing.expect_value(t, reader.num_bits_read, 0)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 0)
+}
+
+@(test)
+test_read_multiple_small_reads :: proc(t: ^testing.T) {
+	buffer := []u32{0xF0F0_F0F0}
+	reader := create_reader(buffer[:])
+
+	for i in 0 ..< 8 {
+		value, success := read_bits(&reader, 4)
+		testing.expect(t, success)
+		testing.expect_value(t, value, 0x0 if i % 2 == 0 else 0xF)
+	}
+
+	testing.expect_value(t, reader.num_bits_read, 32)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 0)
+}
+
+@(test)
+test_read_bits_after_full_read :: proc(t: ^testing.T) {
+	buffer := []u32{0xAAAA_AAAA}
+	reader := create_reader(buffer[:])
+
+	value, success := read_bits(&reader, 32)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 0xAAAA_AAAA)
+
+	// Try to read more bits after fully reading the buffer
+	value, success = read_bits(&reader, 1)
+	testing.expect(t, !success)
+	testing.expect_value(t, reader.num_bits_read, 32)
+	testing.expect_value(t, reader.scratch, 0)
+	testing.expect_value(t, reader.scratch_bits, 0)
 }
