@@ -27,6 +27,8 @@ bits_required :: proc(min, max: int) -> int {
 	return u64_bits_required(u64(max - min))
 }
 
+// OPTIMIZATION(Thomas): 
+// There's definetly way faster ways of doing this
 u64_bits_required :: proc(value: u64) -> int {
 	result := 0
 	v := value
