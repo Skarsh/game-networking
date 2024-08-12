@@ -10,6 +10,7 @@ BitWriter :: struct {
 	word_index:   u32,
 }
 
+// Write the (n = bits) lowest bits from value to the buffer
 write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 
 	// NOTE(Thomas): 
@@ -31,7 +32,7 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 	// 0b0000_1000
 	// - 1
 	// 0b0000_0111
-	// Minus 1 to make all the bits below the leftshift to one
+	// (Minus 1 to make all the bits below the leftshift to one)
 	// 0b0000_0100 & 0b0000_0111 == 0b0000_0100
 
 	mask := u32(1 << bits) - 1
@@ -45,13 +46,27 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 	if writer.scratch_bits >= 32 {
 
 		// Store the value of the scratch into the buffer. We AND (&) mask here with the lower 32-bits
-		// To only write those lower 32 bits into the buffer at the word index 
+		// so that we only write those lower 32 bits into the buffer at the word index 
 		writer.buffer[writer.word_index] = u32(writer.scratch & 0xFF_FF_FF_FF)
 		writer.word_index += 1
 		writer.scratch >>= 32
 		writer.scratch_bits -= 32
 	}
 
+	return true
+}
+
+// Write the remaining bits to memory
+final_flush_to_memory :: proc(writer: ^BitWriter) -> bool {
+
+	if writer.word_index >= u32(len(writer.buffer)) {
+		return false
+	}
+
+	writer.buffer[writer.word_index] = u32(writer.scratch & 0xFF_FF_FF_FF)
+	writer.word_index += 1
+	writer.scratch = 0
+	writer.scratch_bits = 0
 	return true
 }
 
@@ -109,6 +124,10 @@ read_bits :: proc(
 	assert(bits >= 0 && bits <= 32)
 
 	if bits < 0 || bits > 32 {
+		return 0, false
+	}
+
+	if reader.word_index >= u32(len(reader.buffer)) {
 		return 0, false
 	}
 
@@ -250,4 +269,23 @@ test_write_mixed_bit_lengths :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.word_index, 0)
 	testing.expect_value(t, writer.scratch, 0b11111111_1010_1)
 	testing.expect_value(t, writer.scratch_bits, 13)
+}
+
+@(test)
+test_write_flush :: proc(t: ^testing.T) {
+	writer := create_writer(100)
+	defer destroy_writer(&writer)
+
+	res := write_bits(&writer, 0xFFFF_FFFF, 32)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.buffer[0], 0xFFFF_FFFF)
+	res = write_bits(&writer, 0b1101, 4)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.buffer[writer.word_index], 0)
+	res = final_flush_to_memory(&writer)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.buffer[1], 0b1101)
+	testing.expect_value(t, writer.scratch, 0)
+	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.word_index, 2)
 }

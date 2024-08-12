@@ -21,6 +21,7 @@ read_packet_a :: proc(buffer: ^Buffer) -> PacketA {
 	return packet_a
 }
 
+
 Buffer :: struct {
 	data:  []u8,
 	index: uint,
