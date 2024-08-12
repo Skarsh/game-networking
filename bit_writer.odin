@@ -8,6 +8,18 @@ BitWriter :: struct {
 	scratch:      u64,
 	scratch_bits: u32,
 	word_index:   u32,
+	max_bits:     u32,
+}
+
+create_writer :: proc(buffer: []u32) -> BitWriter {
+	bit_writer := BitWriter {
+		buffer       = buffer,
+		scratch      = 0,
+		scratch_bits = 0,
+		word_index   = 0,
+		max_bits     = u32(len(buffer) * 32),
+	}
+	return bit_writer
 }
 
 // Write the (n = bits) lowest bits from value to the buffer
@@ -25,7 +37,8 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 		return false
 	}
 
-	if writer.word_index >= u32(len(writer.buffer)) {
+	// Check if writing these bits would exceed max_bits
+	if writer.word_index * 32 + writer.scratch_bits + bits > writer.max_bits {
 		return false
 	}
 
@@ -63,25 +76,18 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 // Write the remaining bits to memory
 final_flush_to_memory :: proc(writer: ^BitWriter) -> bool {
 
-	if writer.word_index >= u32(len(writer.buffer)) {
+	if writer.word_index * 32 + writer.scratch_bits > writer.max_bits {
 		return false
 	}
 
-	writer.buffer[writer.word_index] = u32(writer.scratch & 0xFF_FF_FF_FF)
-	writer.word_index += 1
+	if writer.scratch_bits > 0 {
+		writer.buffer[writer.word_index] = u32(writer.scratch & 0xFF_FF_FF_FF)
+		writer.word_index += 1
+	}
+
 	writer.scratch = 0
 	writer.scratch_bits = 0
 	return true
-}
-
-create_writer :: proc(buffer: []u32) -> BitWriter {
-	bit_writer := BitWriter {
-		buffer       = buffer,
-		scratch      = 0,
-		scratch_bits = 0,
-		word_index   = 0,
-	}
-	return bit_writer
 }
 
 BitReader :: struct {
@@ -312,6 +318,29 @@ test_write_flush :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
 	testing.expect_value(t, writer.word_index, 2)
+}
+
+@(test)
+test_write_flush_on_last_word :: proc(t: ^testing.T) {
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
+
+	for i in 0 ..< 99 {
+		res := write_bits(&writer, 0xFFFF_FFFF, 32)
+		testing.expect(t, res)
+	}
+	testing.expect_value(t, writer.word_index, 99)
+	write_bits(&writer, 0x0000_0003, 3)
+	success := final_flush_to_memory(&writer)
+	testing.expect(t, success)
+	testing.expect_value(t, writer.buffer[99], 0x0000_0003)
+	testing.expect_value(t, writer.word_index, 100)
+	testing.expect_value(t, writer.scratch, 0)
+	testing.expect_value(t, writer.scratch_bits, 0)
+
+	res := write_bits(&writer, 0x0000_0001, 1)
+	testing.expect(t, !res)
 }
 
 @(test)
