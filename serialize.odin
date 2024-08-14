@@ -211,6 +211,7 @@ test_bits_required :: proc(t: ^testing.T) {
 	testing.expect_value(t, bits_required(1000, 1100), 7)
 	testing.expect_value(t, bits_required(-50, 50), 7)
 	testing.expect_value(t, bits_required(-128, 127), 8)
+	testing.expect_value(t, bits_required(math.min(i32), math.max(i32)), 32)
 }
 
 @(test)
