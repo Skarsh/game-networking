@@ -5,6 +5,24 @@ import "core:math"
 import "core:math/bits"
 import "core:testing"
 
+EPSILON :: 1e-6
+
+approx_equal :: proc "contextless" (a, b: f32, epsilon: f32) -> bool {
+	return math.abs(a - b) < epsilon
+}
+
+vec2_approx_equal :: proc "contextless" (a, b: [2]f32, epsilon: f32) -> bool {
+	return approx_equal(a.x, b.x, epsilon) && approx_equal(a.y, b.y, epsilon)
+}
+
+vec3_approx_equal :: proc "contextless" (a, b: [3]f32, epsilon: f32) -> bool {
+	return(
+		approx_equal(a.x, b.x, epsilon) &&
+		approx_equal(a.y, b.y, epsilon) &&
+		approx_equal(a.z, b.z, epsilon) \
+	)
+}
+
 bits_required :: proc(min, max: i32) -> int {
 	assert(min < max)
 	if min == max {
@@ -13,6 +31,7 @@ bits_required :: proc(min, max: i32) -> int {
 	return bits.len_u32(u32(max - min))
 }
 
+@(require_results)
 serialize_integer :: proc(
 	bit_writer: ^BitWriter,
 	value, min, max: i32,
@@ -26,6 +45,7 @@ serialize_integer :: proc(
 	return success
 }
 
+@(require_results)
 deserialize_integer :: proc(
 	bit_reader: ^BitReader,
 	min: i32,
@@ -44,11 +64,13 @@ deserialize_integer :: proc(
 	return value, true
 }
 
+@(require_results)
 serialize_float :: proc(bit_writer: ^BitWriter, value: f32) -> bool {
 	int_value := transmute(u32)value
 	return write_bits(bit_writer, int_value, 32)
 }
 
+@(require_results)
 deserialize_float :: proc(bit_reader: ^BitReader) -> (f32, bool) {
 	int_value, success := read_bits(bit_reader, 32)
 	if !success {
@@ -57,6 +79,7 @@ deserialize_float :: proc(bit_reader: ^BitReader) -> (f32, bool) {
 	return transmute(f32)int_value, true
 }
 
+@(require_results)
 serialize_compressed_float :: proc(
 	bit_writer: ^BitWriter,
 	value: f32,
@@ -80,6 +103,7 @@ serialize_compressed_float :: proc(
 	return write_bits(bit_writer, integer_value, u32(required_bits))
 }
 
+@(require_results)
 deserialize_compressed_float :: proc(
 	bit_reader: ^BitReader,
 	min: f32,
@@ -105,6 +129,72 @@ deserialize_compressed_float :: proc(
 	normalized_value := f32(integer_value) / f32(max_integer_value)
 	value := normalized_value * delta + min
 	return value, true
+}
+
+Vector2 :: [2]f32
+Vector3 :: [3]f32
+
+@(require_results)
+serialize_vector2 :: proc(bit_writer: ^BitWriter, value: Vector2) -> bool {
+	if !serialize_float(bit_writer, value[0]) {
+		return false
+	}
+	if !serialize_float(bit_writer, value[1]) {
+		return false
+	}
+
+	return true
+}
+
+@(require_results)
+deserialize_vector2 :: proc(bit_reader: ^BitReader) -> (Vector2, bool) {
+	x, success1 := deserialize_float(bit_reader)
+	if !success1 {
+		return {}, false
+	}
+
+	y, success2 := deserialize_float(bit_reader)
+	if !success2 {
+		return {}, false
+	}
+
+	return Vector2{x, y}, true
+}
+
+
+@(require_results)
+serialize_vector3 :: proc(bit_writer: ^BitWriter, value: Vector3) -> bool {
+	if !serialize_float(bit_writer, value[0]) {
+		return false
+	}
+	if !serialize_float(bit_writer, value[1]) {
+		return false
+	}
+	if !serialize_float(bit_writer, value[2]) {
+		return false
+	}
+
+	return true
+}
+
+@(require_results)
+deserialize_vector3 :: proc(bit_reader: ^BitReader) -> (Vector3, bool) {
+	x, success1 := deserialize_float(bit_reader)
+	if !success1 {
+		return {}, false
+	}
+
+	y, success2 := deserialize_float(bit_reader)
+	if !success2 {
+		return {}, false
+	}
+
+	z, success3 := deserialize_float(bit_reader)
+	if !success3 {
+		return {}, false
+	}
+
+	return Vector3{x, y, z}, true
 }
 
 @(test)
@@ -270,5 +360,59 @@ test_serialize_deserialize_compressed_float :: proc(t: ^testing.T) {
 		t,
 		math.abs(deserialized_value - original_value) < resolution,
 		fmt.tprintf("Expected %f, got %f", original_value, deserialized_value),
+	)
+}
+
+@(test)
+test_serialize_deserialize_vector2 :: proc(t: ^testing.T) {
+	buffer := []u32{0, 0}
+	writer := create_writer(buffer[:])
+	reader := create_reader(buffer[:])
+
+	original_value := Vector2{3.14159, 2.71828}
+
+	// Serialize
+	res := serialize_vector2(&writer, original_value)
+	testing.expect(t, res)
+
+	// Flush to memory
+	res = final_flush_to_memory(&writer)
+	testing.expect(t, res)
+
+	// Deserialize
+	deserialized_value, success := deserialize_vector2(&reader)
+	testing.expect(t, success)
+
+	testing.expect(
+		t,
+		vec2_approx_equal(original_value, deserialized_value, EPSILON),
+		fmt.tprintf("Expected %v, got %v", original_value, deserialized_value),
+	)
+}
+
+@(test)
+test_serialize_deserialize_vector3 :: proc(t: ^testing.T) {
+	buffer := []u32{0, 0, 0}
+	writer := create_writer(buffer[:])
+	reader := create_reader(buffer[:])
+
+	original_value := Vector3{3.14159, 2.71828, 1.61803}
+
+	// Serialize
+	res := serialize_vector3(&writer, original_value)
+	testing.expect(t, res)
+
+	// Flush to memory
+	res = final_flush_to_memory(&writer)
+	testing.expect(t, res)
+
+	// Deserialize
+	deserialized_value, success := deserialize_vector3(&reader)
+	testing.expect(t, success)
+
+	testing.expect(
+		t,
+		vec3_approx_equal(original_value, deserialized_value, EPSILON),
+		fmt.tprintf("Expected %v, got %v", original_value, deserialized_value),
 	)
 }

@@ -23,6 +23,7 @@ create_writer :: proc(buffer: []u32) -> BitWriter {
 }
 
 // Write the (n = bits) lowest bits from value to the buffer
+@(require_results)
 write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 
 	// NOTE(Thomas): 
@@ -77,6 +78,7 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 }
 
 // Write the remaining bits to memory
+@(require_results)
 final_flush_to_memory :: proc(writer: ^BitWriter) -> bool {
 
 	if writer.word_index * 32 + writer.scratch_bits > writer.max_bits {
@@ -114,6 +116,7 @@ create_reader :: proc(buffer: []u32) -> BitReader {
 	return bit_reader
 }
 
+@(require_results)
 read_bits :: proc(
 	reader: ^BitReader,
 	bits: u32,
@@ -334,7 +337,8 @@ test_write_flush_on_last_word :: proc(t: ^testing.T) {
 		testing.expect(t, res)
 	}
 	testing.expect_value(t, writer.word_index, 99)
-	write_bits(&writer, 0x0000_0003, 3)
+	res := write_bits(&writer, 0x0000_0003, 3)
+	testing.expect(t, res)
 	success := final_flush_to_memory(&writer)
 	testing.expect(t, success)
 	testing.expect_value(t, writer.buffer[99], 0x0000_0003)
@@ -342,7 +346,7 @@ test_write_flush_on_last_word :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
 
-	res := write_bits(&writer, 0x0000_0001, 1)
+	res = write_bits(&writer, 0x0000_0001, 1)
 	testing.expect(t, !res)
 }
 
@@ -676,6 +680,7 @@ test_write_then_read_full_buffer :: proc(t: ^testing.T) {
 	testing.expect_value(t, value, 0xAAAA_AAAA)
 
 	// Try to read one more bit, which should fail
-	_, read_success = read_bits(&reader, 1)
+	value, read_success = read_bits(&reader, 1)
 	testing.expect(t, !read_success)
+	testing.expect_value(t, value, 0)
 }
