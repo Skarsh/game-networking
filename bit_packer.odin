@@ -27,7 +27,10 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 
 	// NOTE(Thomas): 
 	// Asserting for debugging, probably remove when stable
-	assert(bits >= 0 && bits <= 32)
+	assert(
+		bits >= 0 && bits <= 32,
+		fmt.tprintf("Bits assumed to be 0 <= bits <= 32, but got %d", bits),
+	)
 
 	if bits == 0 {
 		return true
