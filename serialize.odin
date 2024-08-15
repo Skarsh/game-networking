@@ -197,6 +197,123 @@ deserialize_vector3 :: proc(bit_reader: ^BitReader) -> (Vector3, bool) {
 	return Vector3{x, y, z}, true
 }
 
+@(require_results)
+serialize_compressed_vector2 :: proc(
+	bit_writer: ^BitWriter,
+	vec2: Vector2,
+	min: f32,
+	max: f32,
+	resolution: f32,
+) -> bool {
+	if !serialize_compressed_float(bit_writer, vec2[0], min, max, resolution) {
+		return false
+	}
+
+	if !serialize_compressed_float(bit_writer, vec2[1], min, max, resolution) {
+		return false
+	}
+	return true
+}
+
+@(require_results)
+deserialize_compressed_vector2 :: proc(
+	bit_reader: ^BitReader,
+	min: f32,
+	max: f32,
+	resolution: f32,
+) -> (
+	Vector2,
+	bool,
+) {
+	x, success1 := deserialize_compressed_float(
+		bit_reader,
+		min,
+		max,
+		resolution,
+	)
+	if !success1 {
+		return {}, false
+	}
+
+	y, success2 := deserialize_compressed_float(
+		bit_reader,
+		min,
+		max,
+		resolution,
+	)
+	if !success2 {
+		return {}, false
+	}
+
+	return Vector2{x, y}, true
+}
+
+@(require_results)
+serialize_compressed_vector3 :: proc(
+	bit_writer: ^BitWriter,
+	vec3: Vector3,
+	min: f32,
+	max: f32,
+	resolution: f32,
+) -> bool {
+	if !serialize_compressed_float(bit_writer, vec3[0], min, max, resolution) {
+		return false
+	}
+
+	if !serialize_compressed_float(bit_writer, vec3[1], min, max, resolution) {
+		return false
+	}
+
+	if !serialize_compressed_float(bit_writer, vec3[2], min, max, resolution) {
+		return false
+	}
+
+	return true
+}
+
+@(require_results)
+deserialize_compressed_vector3 :: proc(
+	bit_reader: ^BitReader,
+	min: f32,
+	max: f32,
+	resolution: f32,
+) -> (
+	Vector3,
+	bool,
+) {
+	x, success1 := deserialize_compressed_float(
+		bit_reader,
+		min,
+		max,
+		resolution,
+	)
+	if !success1 {
+		return Vector3{}, false
+	}
+
+	y, success2 := deserialize_compressed_float(
+		bit_reader,
+		min,
+		max,
+		resolution,
+	)
+	if !success2 {
+		return Vector3{}, false
+	}
+
+	z, success3 := deserialize_compressed_float(
+		bit_reader,
+		min,
+		max,
+		resolution,
+	)
+	if !success3 {
+		return Vector3{}, false
+	}
+
+	return Vector3{x, y, z}, true
+}
+
 @(test)
 test_bits_required :: proc(t: ^testing.T) {
 	testing.expect_value(t, bits_required(0, 1), 1)
@@ -365,6 +482,46 @@ test_serialize_deserialize_compressed_float :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_serialize_deserialize_compressed_negative_float :: proc(t: ^testing.T) {
+	buffer := []u32{0, 0}
+	writer := create_writer(buffer[:])
+	reader := create_reader(buffer[:])
+
+	original_value: f32 = -3.14159
+	min: f32 = -10
+	max: f32 = 0
+	resolution: f32 = 0.01
+
+	// Serialize
+	res := serialize_compressed_float(
+		&writer,
+		original_value,
+		min,
+		max,
+		resolution,
+	)
+	testing.expect(t, res)
+
+	// Flush to memory
+	res = final_flush_to_memory(&writer)
+	testing.expect(t, res)
+
+	// Deserialize
+	deserialized_value, success := deserialize_compressed_float(
+		&reader,
+		min,
+		max,
+		resolution,
+	)
+	testing.expect(t, success)
+	testing.expect(
+		t,
+		math.abs(deserialized_value - original_value) < resolution,
+		fmt.tprintf("Expected %f, got %f", original_value, deserialized_value),
+	)
+}
+
+@(test)
 test_serialize_deserialize_vector2 :: proc(t: ^testing.T) {
 	buffer := []u32{0, 0}
 	writer := create_writer(buffer[:])
@@ -415,5 +572,87 @@ test_serialize_deserialize_vector3 :: proc(t: ^testing.T) {
 		t,
 		vec3_approx_equal(original_value, deserialized_value, EPSILON),
 		fmt.tprintf("Expected %v, got %v", original_value, deserialized_value),
+	)
+}
+
+@(test)
+test_serialize_deserialize_compressed_vector2 :: proc(t: ^testing.T) {
+	buffer := []u32{0, 0}
+	writer := create_writer(buffer[:])
+	reader := create_reader(buffer[:])
+
+	original_vec := Vector2{3.14159, 2.71828}
+	min: f32 = 0
+	max: f32 = 10
+	resolution: f32 = 0.01
+
+	// Serialize
+	res := serialize_compressed_vector2(
+		&writer,
+		original_vec,
+		min,
+		max,
+		resolution,
+	)
+	testing.expect(t, res)
+
+	// Flush to memory
+	res = final_flush_to_memory(&writer)
+	testing.expect(t, res)
+
+	// Deserialize
+	deserialized_vec, success := deserialize_compressed_vector2(
+		&reader,
+		min,
+		max,
+		resolution,
+	)
+	testing.expect(t, success)
+
+	testing.expect(
+		t,
+		vec2_approx_equal(original_vec, deserialized_vec, resolution),
+		fmt.tprintf("Expected %v, got %v", original_vec, deserialized_vec),
+	)
+}
+
+@(test)
+test_serialize_deserialize_compressed_vector3 :: proc(t: ^testing.T) {
+	buffer := []u32{0, 0, 0}
+	writer := create_writer(buffer[:])
+	reader := create_reader(buffer[:])
+
+	original_vec := Vector3{3.14159, 2.71828, 1.61803}
+	min: f32 = 0
+	max: f32 = 10
+	resolution: f32 = 0.01
+
+	// Serialize
+	res := serialize_compressed_vector3(
+		&writer,
+		original_vec,
+		min,
+		max,
+		resolution,
+	)
+	testing.expect(t, res)
+
+	// Flush to memory
+	res = final_flush_to_memory(&writer)
+	testing.expect(t, res)
+
+	// Deserialize
+	deserialized_vec, success := deserialize_compressed_vector3(
+		&reader,
+		min,
+		max,
+		resolution,
+	)
+	testing.expect(t, success)
+
+	testing.expect(
+		t,
+		vec3_approx_equal(original_vec, deserialized_vec, resolution),
+		fmt.tprintf("Expected %v, got %v", original_vec, deserialized_vec),
 	)
 }
