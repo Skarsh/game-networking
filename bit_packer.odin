@@ -9,6 +9,7 @@ BitWriter :: struct {
 	scratch_bits: u32,
 	word_index:   u32,
 	max_bits:     u32,
+	bits_written: u32,
 }
 
 create_writer :: proc(buffer: []u32) -> BitWriter {
@@ -18,6 +19,7 @@ create_writer :: proc(buffer: []u32) -> BitWriter {
 		scratch_bits = 0,
 		word_index   = 0,
 		max_bits     = u32(len(buffer) * 32),
+		bits_written = 0,
 	}
 	return bit_writer
 }
@@ -72,6 +74,7 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 		writer.word_index += 1
 		writer.scratch >>= 32
 		writer.scratch_bits -= 32
+		writer.bits_written += 32
 	}
 
 	return true
@@ -88,11 +91,15 @@ final_flush_to_memory :: proc(writer: ^BitWriter) -> bool {
 	if writer.scratch_bits > 0 {
 		writer.buffer[writer.word_index] = u32(writer.scratch & 0xFF_FF_FF_FF)
 		writer.word_index += 1
+		writer.bits_written += writer.scratch_bits
 	}
 
 	writer.scratch = 0
 	writer.scratch_bits = 0
 	return true
+}
+
+write_align :: proc(writer: ^BitWriter) {
 }
 
 BitReader :: struct {
@@ -174,6 +181,7 @@ test_write_zero_and_zero_bits :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.buffer[writer.word_index], 0)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.bits_written, 0)
 }
 
 @(test)
@@ -187,6 +195,7 @@ test_write_single_bit :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.word_index, 0)
 	testing.expect_value(t, writer.scratch, 1)
 	testing.expect_value(t, writer.scratch_bits, 1)
+	testing.expect_value(t, writer.bits_written, 0)
 }
 
 @(test)
@@ -201,6 +210,7 @@ test_write_full_word :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.buffer[0], 0xFFFF_FFFF)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.bits_written, 32)
 }
 
 @(test)
@@ -217,6 +227,7 @@ test_write_across_word_boundary :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.buffer[0], 0xFFFF_FFFF)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.bits_written, 32)
 }
 
 @(test)
@@ -235,6 +246,7 @@ test_write_multiple_words :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.buffer[2], 0xFFFF_FFFF)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.bits_written, 3 * 32)
 }
 
 @(test)
@@ -250,6 +262,7 @@ test_write_partial_bits :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.word_index, 0)
 	testing.expect_value(t, writer.scratch, 0b11111101)
 	testing.expect_value(t, writer.scratch_bits, 8)
+	testing.expect_value(t, writer.bits_written, 0)
 }
 
 @(test)
@@ -287,6 +300,7 @@ test_write_zero_bits :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.word_index, 0)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.bits_written, 0)
 }
 
 @(test)
@@ -315,15 +329,22 @@ test_write_flush :: proc(t: ^testing.T) {
 	res := write_bits(&writer, 0xFFFF_FFFF, 32)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.buffer[0], 0xFFFF_FFFF)
+	testing.expect_value(t, writer.scratch, 0)
+	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.bits_written, 32)
 	res = write_bits(&writer, 0b1101, 4)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.buffer[writer.word_index], 0)
+	testing.expect_value(t, writer.scratch, 0b1101)
+	testing.expect_value(t, writer.scratch_bits, 4)
+	testing.expect_value(t, writer.bits_written, 32)
 	res = final_flush_to_memory(&writer)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.buffer[1], 0b1101)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
 	testing.expect_value(t, writer.word_index, 2)
+	testing.expect_value(t, writer.bits_written, 36)
 }
 
 @(test)
@@ -335,19 +356,27 @@ test_write_flush_on_last_word :: proc(t: ^testing.T) {
 	for i in 0 ..< 99 {
 		res := write_bits(&writer, 0xFFFF_FFFF, 32)
 		testing.expect(t, res)
+		testing.expect_value(t, writer.bits_written, u32(i + 1) * 32)
 	}
+
 	testing.expect_value(t, writer.word_index, 99)
+	testing.expect_value(t, writer.bits_written, 99 * 32)
+
 	res := write_bits(&writer, 0x0000_0003, 3)
+	testing.expect_value(t, writer.bits_written, 99 * 32)
 	testing.expect(t, res)
+
 	success := final_flush_to_memory(&writer)
 	testing.expect(t, success)
 	testing.expect_value(t, writer.buffer[99], 0x0000_0003)
 	testing.expect_value(t, writer.word_index, 100)
 	testing.expect_value(t, writer.scratch, 0)
 	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.bits_written, (99 * 32) + 3)
 
 	res = write_bits(&writer, 0x0000_0001, 1)
 	testing.expect(t, !res)
+	testing.expect_value(t, writer.bits_written, (99 * 32) + 3)
 }
 
 @(test)
