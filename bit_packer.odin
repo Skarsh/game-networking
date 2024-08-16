@@ -99,7 +99,12 @@ final_flush_to_memory :: proc(writer: ^BitWriter) -> bool {
 	return true
 }
 
-write_align :: proc(writer: ^BitWriter) {
+write_align :: proc(writer: ^BitWriter) -> bool {
+	remainder_bits := writer.bits_written % 8
+	if remainder_bits != 0 {
+		write_bits(0, 8 - remainder_bits)
+		assert((writer.bits_written % 8) == 0)
+	}
 }
 
 BitReader :: struct {
