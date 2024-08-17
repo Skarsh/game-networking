@@ -110,22 +110,22 @@ write_align :: proc(writer: ^BitWriter) -> bool {
 }
 
 BitReader :: struct {
-	buffer:        []u32,
-	scratch:       u64,
-	scratch_bits:  u32,
-	total_bits:    u32,
-	num_bits_read: u32,
-	word_index:    u32,
+	buffer:       []u32,
+	scratch:      u64,
+	scratch_bits: u32,
+	total_bits:   u32,
+	bits_read:    u32,
+	word_index:   u32,
 }
 
 create_reader :: proc(buffer: []u32) -> BitReader {
 	bit_reader := BitReader {
-		buffer        = buffer,
-		scratch       = 0,
-		scratch_bits  = 0,
-		total_bits    = u32(len(buffer) * 32),
-		num_bits_read = 0,
-		word_index    = 0,
+		buffer       = buffer,
+		scratch      = 0,
+		scratch_bits = 0,
+		total_bits   = u32(len(buffer) * 32),
+		bits_read    = 0,
+		word_index   = 0,
 	}
 	return bit_reader
 }
@@ -146,7 +146,7 @@ read_bits :: proc(
 		return 0, false
 	}
 
-	if bits > 32 || reader.num_bits_read + bits > reader.total_bits {
+	if bits > 32 || reader.bits_read + bits > reader.total_bits {
 		return 0, false
 	}
 
@@ -170,9 +170,27 @@ read_bits :: proc(
 	// Update the scratch
 	reader.scratch >>= bits
 	reader.scratch_bits -= bits
-	reader.num_bits_read += bits
+	reader.bits_read += bits
 
 	return value, true
+}
+
+@(require_results)
+read_align :: proc(reader: ^BitReader) -> bool {
+	remainder_bits := reader.bits_read % 8
+	if remainder_bits != 0 {
+		value, success := read_bits(reader, 8 - remainder_bits)
+		if !success {
+			return false
+		}
+
+		assert(reader.bits_read % 8 == 0)
+
+		if value != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 @(test)
@@ -483,7 +501,7 @@ test_read_zero_bits :: proc(t: ^testing.T) {
 	value, success := read_bits(&reader, 0)
 	testing.expect(t, success)
 	testing.expect_value(t, value, 0)
-	testing.expect_value(t, reader.num_bits_read, 0)
+	testing.expect_value(t, reader.bits_read, 0)
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 0)
 }
@@ -496,7 +514,7 @@ test_read_single_bit :: proc(t: ^testing.T) {
 	value, success := read_bits(&reader, 1)
 	testing.expect(t, success)
 	testing.expect_value(t, value, 1)
-	testing.expect_value(t, reader.num_bits_read, 1)
+	testing.expect_value(t, reader.bits_read, 1)
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 31)
 }
@@ -509,7 +527,7 @@ test_read_full_word :: proc(t: ^testing.T) {
 	value, success := read_bits(&reader, 32)
 	testing.expect(t, success)
 	testing.expect_value(t, value, 0xFFFF_FFFF)
-	testing.expect_value(t, reader.num_bits_read, 32)
+	testing.expect_value(t, reader.bits_read, 32)
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 0)
 }
@@ -537,7 +555,7 @@ test_read_across_word_boundary :: proc(t: ^testing.T) {
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 16)
 
-	testing.expect_value(t, reader.num_bits_read, 48)
+	testing.expect_value(t, reader.bits_read, 48)
 }
 
 @(test)
@@ -557,7 +575,7 @@ test_read_partial_bits :: proc(t: ^testing.T) {
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 24)
 
-	testing.expect_value(t, reader.num_bits_read, 8)
+	testing.expect_value(t, reader.bits_read, 8)
 }
 
 @(test)
@@ -572,7 +590,7 @@ test_read_overflow_protection :: proc(t: ^testing.T) {
 	// This should fail as we've read all available bits
 	value, success = read_bits(&reader, 1)
 	testing.expect(t, !success)
-	testing.expect_value(t, reader.num_bits_read, 32)
+	testing.expect_value(t, reader.bits_read, 32)
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 0)
 }
@@ -600,7 +618,7 @@ test_read_mixed_bit_lengths :: proc(t: ^testing.T) {
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 19)
 
-	testing.expect_value(t, reader.num_bits_read, 13)
+	testing.expect_value(t, reader.bits_read, 13)
 }
 
 @(test)
@@ -618,7 +636,7 @@ test_read_exact_buffer_size :: proc(t: ^testing.T) {
 
 	value, success = read_bits(&reader, 1)
 	testing.expect(t, !success)
-	testing.expect_value(t, reader.num_bits_read, 64)
+	testing.expect_value(t, reader.bits_read, 64)
 }
 
 @(test)
@@ -628,7 +646,7 @@ test_read_large_bit_count :: proc(t: ^testing.T) {
 
 	value, success := read_bits(&reader, 33)
 	testing.expect(t, !success)
-	testing.expect_value(t, reader.num_bits_read, 0)
+	testing.expect_value(t, reader.bits_read, 0)
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 0)
 }
@@ -640,7 +658,7 @@ test_read_empty_buffer :: proc(t: ^testing.T) {
 
 	value, success := read_bits(&reader, 1)
 	testing.expect(t, !success)
-	testing.expect_value(t, reader.num_bits_read, 0)
+	testing.expect_value(t, reader.bits_read, 0)
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 0)
 }
@@ -656,7 +674,7 @@ test_read_multiple_small_reads :: proc(t: ^testing.T) {
 		testing.expect_value(t, value, 0x0 if i % 2 == 0 else 0xF)
 	}
 
-	testing.expect_value(t, reader.num_bits_read, 32)
+	testing.expect_value(t, reader.bits_read, 32)
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 0)
 }
@@ -673,7 +691,7 @@ test_read_bits_after_full_read :: proc(t: ^testing.T) {
 	// Try to read more bits after fully reading the buffer
 	value, success = read_bits(&reader, 1)
 	testing.expect(t, !success)
-	testing.expect_value(t, reader.num_bits_read, 32)
+	testing.expect_value(t, reader.bits_read, 32)
 	testing.expect_value(t, reader.scratch, 0)
 	testing.expect_value(t, reader.scratch_bits, 0)
 }
