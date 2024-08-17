@@ -822,3 +822,22 @@ test_write_then_read_full_buffer :: proc(t: ^testing.T) {
 	testing.expect(t, !read_success)
 	testing.expect_value(t, value, 0)
 }
+
+@(test)
+test_read_align :: proc(t: ^testing.T) {
+	buffer := []u32{0, 0}
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+
+	res := write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+	res = write_align(&writer)
+	testing.expect(t, res)
+	res = final_flush_to_memory(&writer)
+	testing.expect(t, res)
+
+	value, success := read_bits(&reader, 1)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 1)
+
+}
