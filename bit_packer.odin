@@ -64,6 +64,7 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 	// Left shift to write the value in where its supposed to be
 	writer.scratch |= u64(masked_value) << writer.scratch_bits
 	writer.scratch_bits += bits
+	writer.bits_written += bits
 
 	// We've overflowed the scratch bits, time to flush the bits
 	if writer.scratch_bits >= 32 {
@@ -74,7 +75,6 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 		writer.word_index += 1
 		writer.scratch >>= 32
 		writer.scratch_bits -= 32
-		writer.bits_written += 32
 	}
 
 	return true
@@ -91,7 +91,6 @@ final_flush_to_memory :: proc(writer: ^BitWriter) -> bool {
 	if writer.scratch_bits > 0 {
 		writer.buffer[writer.word_index] = u32(writer.scratch & 0xFF_FF_FF_FF)
 		writer.word_index += 1
-		writer.bits_written += writer.scratch_bits
 	}
 
 	writer.scratch = 0
@@ -107,7 +106,7 @@ write_align :: proc(writer: ^BitWriter) -> bool {
 		assert((writer.bits_written % 8) == 0)
 		return success
 	}
-	return false
+	return true
 }
 
 BitReader :: struct {
@@ -201,7 +200,7 @@ test_write_single_bit :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.word_index, 0)
 	testing.expect_value(t, writer.scratch, 1)
 	testing.expect_value(t, writer.scratch_bits, 1)
-	testing.expect_value(t, writer.bits_written, 0)
+	testing.expect_value(t, writer.bits_written, 1)
 }
 
 @(test)
@@ -275,7 +274,7 @@ test_write_partial_bits :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.word_index, 0)
 	testing.expect_value(t, writer.scratch, 0b11111101)
 	testing.expect_value(t, writer.scratch_bits, 8)
-	testing.expect_value(t, writer.bits_written, 0)
+	testing.expect_value(t, writer.bits_written, 8)
 }
 
 @(test)
@@ -347,7 +346,7 @@ test_write_flush :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.buffer[writer.word_index], 0)
 	testing.expect_value(t, writer.scratch, 0b1101)
 	testing.expect_value(t, writer.scratch_bits, 4)
-	testing.expect_value(t, writer.bits_written, 32)
+	testing.expect_value(t, writer.bits_written, 36)
 	res = final_flush_to_memory(&writer)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.buffer[1], 0b1101)
@@ -373,7 +372,7 @@ test_write_flush_on_last_word :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.bits_written, 99 * 32)
 
 	res := write_bits(&writer, 0x0000_0003, 3)
-	testing.expect_value(t, writer.bits_written, 99 * 32)
+	testing.expect_value(t, writer.bits_written, (99 * 32) + 3)
 	testing.expect(t, res)
 
 	success := final_flush_to_memory(&writer)
@@ -387,6 +386,93 @@ test_write_flush_on_last_word :: proc(t: ^testing.T) {
 	res = write_bits(&writer, 0x0000_0001, 1)
 	testing.expect(t, !res)
 	testing.expect_value(t, writer.bits_written, (99 * 32) + 3)
+}
+
+@(test)
+test_write_align :: proc(t: ^testing.T) {
+	buffer := []u32{0}
+	writer := create_writer(buffer)
+	res := write_bits(&writer, 0b0000_1111, 4)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch, 0b0000_1111)
+	testing.expect_value(t, writer.scratch_bits, 4)
+	testing.expect_value(t, writer.bits_written, 4)
+
+	res = write_align(&writer)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch, 0b0000_1111)
+	testing.expect_value(t, writer.scratch_bits, 8)
+	testing.expect_value(t, writer.bits_written, 8)
+}
+
+@(test)
+test_write_align_empty_on_0th_bit :: proc(t: ^testing.T) {
+	buffer := []u32{0}
+	writer := create_writer(buffer)
+	res := write_align(&writer)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch, 0)
+	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.bits_written, 0)
+}
+
+@(test)
+test_write_align_empty_on_1th_bit :: proc(t: ^testing.T) {
+	buffer := []u32{0}
+	writer := create_writer(buffer)
+	res := write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch, 1)
+	testing.expect_value(t, writer.scratch_bits, 1)
+	testing.expect_value(t, writer.bits_written, 1)
+	res = write_align(&writer)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch, 1)
+	testing.expect_value(t, writer.scratch_bits, 8)
+	testing.expect_value(t, writer.bits_written, 8)
+
+}
+
+@(test)
+test_write_align_wrap_word :: proc(t: ^testing.T) {
+	buffer := []u32{0, 0}
+	writer := create_writer(buffer)
+
+	res := write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch_bits, 1)
+	testing.expect_value(t, writer.bits_written, 1)
+
+	res = write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+	res = write_align(&writer)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch_bits, 8)
+	testing.expect_value(t, writer.bits_written, 8)
+
+	res = write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+	res = write_align(&writer)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch_bits, 16)
+	testing.expect_value(t, writer.bits_written, 16)
+
+	res = write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+	res = write_align(&writer)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch_bits, 24)
+	testing.expect_value(t, writer.bits_written, 24)
+
+	res = write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+
+	// Write align here will wrap the word
+	res = write_align(&writer)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch_bits, 0)
+	testing.expect_value(t, writer.bits_written, 32)
+	testing.expect_value(t, writer.word_index, 1)
 }
 
 @(test)
