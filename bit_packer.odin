@@ -99,12 +99,15 @@ final_flush_to_memory :: proc(writer: ^BitWriter) -> bool {
 	return true
 }
 
+@(require_results)
 write_align :: proc(writer: ^BitWriter) -> bool {
 	remainder_bits := writer.bits_written % 8
 	if remainder_bits != 0 {
-		write_bits(0, 8 - remainder_bits)
+		success := write_bits(writer, 0, 8 - remainder_bits)
 		assert((writer.bits_written % 8) == 0)
+		return success
 	}
+	return false
 }
 
 BitReader :: struct {
@@ -175,8 +178,7 @@ read_bits :: proc(
 
 @(test)
 test_write_zero_and_zero_bits :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
+	buffer := []u32{0}
 	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0, 0)
@@ -191,8 +193,7 @@ test_write_zero_and_zero_bits :: proc(t: ^testing.T) {
 
 @(test)
 test_write_single_bit :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
+	buffer := []u32{0}
 	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 1, 1)
@@ -204,9 +205,19 @@ test_write_single_bit :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_write_multiple_zero_bits :: proc(t: ^testing.T) {
+	buffer := []u32{0}
+	writer := create_writer(buffer)
+
+	res := write_bits(&writer, 0, 3)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.scratch, 0)
+	testing.expect_value(t, writer.scratch_bits, 3)
+}
+
+@(test)
 test_write_full_word :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
+	buffer := []u32{0}
 	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0xFFFF_FFFF, 32)
@@ -220,8 +231,7 @@ test_write_full_word :: proc(t: ^testing.T) {
 
 @(test)
 test_write_across_word_boundary :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
+	buffer := []u32{0}
 	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0xFFFF, 16)
@@ -237,8 +247,7 @@ test_write_across_word_boundary :: proc(t: ^testing.T) {
 
 @(test)
 test_write_multiple_words :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
+	buffer := []u32{0, 0, 0}
 	writer := create_writer(buffer)
 
 	for i in 0 ..< 3 {
@@ -256,8 +265,7 @@ test_write_multiple_words :: proc(t: ^testing.T) {
 
 @(test)
 test_write_partial_bits :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
+	buffer := []u32{0}
 	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0b101, 3)
@@ -296,8 +304,7 @@ test_overflow_protection :: proc(t: ^testing.T) {
 
 @(test)
 test_write_zero_bits :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
+	buffer := []u32{0}
 	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0xFFFF_FFFF, 0)
@@ -310,9 +317,8 @@ test_write_zero_bits :: proc(t: ^testing.T) {
 
 @(test)
 test_write_mixed_bit_lengths :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
-	writer := create_writer(buffer)
+	buffer := []u32{0}
+	writer := create_writer(buffer[:])
 
 	res := write_bits(&writer, 0b1, 1)
 	testing.expect(t, res)
@@ -327,8 +333,7 @@ test_write_mixed_bit_lengths :: proc(t: ^testing.T) {
 
 @(test)
 test_write_flush :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
+	buffer := []u32{0, 0}
 	writer := create_writer(buffer)
 
 	res := write_bits(&writer, 0xFFFF_FFFF, 32)
@@ -589,8 +594,7 @@ test_read_bits_after_full_read :: proc(t: ^testing.T) {
 
 @(test)
 test_write_then_read_simple :: proc(t: ^testing.T) {
-	buffer := make([]u32, 2)
-	defer delete(buffer)
+	buffer := []u32{0, 0}
 
 	writer := create_writer(buffer)
 	success := write_bits(&writer, 0b1010, 4)
@@ -612,8 +616,7 @@ test_write_then_read_simple :: proc(t: ^testing.T) {
 
 @(test)
 test_write_then_read_full_word :: proc(t: ^testing.T) {
-	buffer := make([]u32, 1)
-	defer delete(buffer)
+	buffer := []u32{0}
 
 	writer := create_writer(buffer)
 	success := write_bits(&writer, 0xAABB_CCDD, 32)
@@ -629,8 +632,7 @@ test_write_then_read_full_word :: proc(t: ^testing.T) {
 
 @(test)
 test_write_then_read_across_word_boundary :: proc(t: ^testing.T) {
-	buffer := make([]u32, 2)
-	defer delete(buffer)
+	buffer := []u32{0, 0}
 
 	writer := create_writer(buffer)
 	success := write_bits(&writer, 0xFFFF, 16)
@@ -658,8 +660,7 @@ test_write_then_read_across_word_boundary :: proc(t: ^testing.T) {
 
 @(test)
 test_write_then_read_mixed_bit_lengths :: proc(t: ^testing.T) {
-	buffer := make([]u32, 2)
-	defer delete(buffer)
+	buffer := []u32{0}
 
 	writer := create_writer(buffer)
 	success := write_bits(&writer, 0b1, 1)
@@ -693,8 +694,7 @@ test_write_then_read_mixed_bit_lengths :: proc(t: ^testing.T) {
 
 @(test)
 test_write_then_read_full_buffer :: proc(t: ^testing.T) {
-	buffer := make([]u32, 2)
-	defer delete(buffer)
+	buffer := []u32{0, 0}
 
 	writer := create_writer(buffer)
 	success := write_bits(&writer, 0xFFFF_FFFF, 32)
