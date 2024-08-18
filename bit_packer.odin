@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:mem"
 import "core:testing"
 
 BitWriter :: struct {
@@ -113,31 +114,56 @@ write_align :: proc(writer: ^BitWriter) -> bool {
 @(require_results)
 write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 	bytes := u32(len(data))
-	bits_written_word_remainder := writer.bits_written % 32
 
 	assert(get_align_bits(writer) == 0)
 	assert(writer.bits_written + bytes * 8 <= writer.num_bits)
 	assert(
-		bits_written_word_remainder == 0 ||
-		bits_written_word_remainder == 8 ||
-		bits_written_word_remainder == 16 ||
-		bits_written_word_remainder == 24,
+		(writer.bits_written % 32) == 0 ||
+		(writer.bits_written % 32) == 8 ||
+		(writer.bits_written % 32) == 16 ||
+		(writer.bits_written % 32) == 24,
 	)
 
 	// Whaaaat???? Understand this better
-	head_bytes := (4 - (bits_written_word_remainder) / 8) % 4
+	head_bytes := (4 - ((writer.bits_written % 32)) / 8) % 4
 	if head_bytes > bytes {
 		head_bytes = bytes
 	}
 
-	flush_bits(writer)
+	success := flush_bits(writer)
+	if !success {
+		return false
+	}
 
 	num_words := (bytes - head_bytes) / 4
 	if num_words > 0 {
-		assert(bits_written_word_remainder == 0)
+		assert(writer.bits_written % 32 == 0)
+		copy_len := int(num_words) * 4
+		mem.copy(
+			&writer.buffer[writer.word_index],
+			&data[head_bytes],
+			copy_len,
+		)
+		writer.bits_written += num_words * 32
+		writer.word_index += num_words
+		writer.scratch = 0
 	}
 
-	return false
+	assert(get_align_bits(writer) == 0)
+	tail_start := head_bytes + (num_words * 4)
+	tail_bytes := bytes - tail_start
+	assert(tail_bytes >= 0 && tail_bytes < 4)
+	for i in 0 ..< tail_bytes {
+		success = write_bits(writer, u32(data[tail_start + i]), 8)
+		if !success {
+			return false
+		}
+	}
+
+	assert(get_align_bits(writer) == 0)
+	assert(head_bytes + (num_words * 4) + tail_bytes == bytes)
+
+	return true
 }
 
 // TODO(Thomas): Needs proper unit testing
@@ -893,4 +919,48 @@ test_read_align_two_bit_set_should_fail :: proc(t: ^testing.T) {
 
 	// TODO(Thomas): This is the one that fails
 	testing.expect_value(t, reader.bits_read, 1)
+}
+
+@(test)
+test_get_align :: proc(t: ^testing.T) {
+	buffer := []u32{0, 0, 0, 0}
+	writer := create_writer(buffer)
+
+	align := get_align_bits(&writer)
+	testing.expect_value(t, align, 0)
+
+	res := write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.bits_written, 1)
+
+	align = get_align_bits(&writer)
+	testing.expect_value(t, align, 7)
+
+	res = write_bits(&writer, 1, 6)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.bits_written, 7)
+
+	align = get_align_bits(&writer)
+	testing.expect_value(t, align, 1)
+
+	res = write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.bits_written, 8)
+
+	align = get_align_bits(&writer)
+	testing.expect_value(t, align, 0)
+
+	res = write_bits(&writer, 1, 32)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.bits_written, 40)
+
+	align = get_align_bits(&writer)
+	testing.expect_value(t, align, 0)
+
+	res = write_bits(&writer, 1, 1)
+	testing.expect(t, res)
+	testing.expect_value(t, writer.bits_written, 41)
+
+	align = get_align_bits(&writer)
+	testing.expect_value(t, align, 7)
 }
