@@ -314,6 +314,16 @@ deserialize_compressed_vector3 :: proc(
 	return Vector3{x, y, z}, true
 }
 
+@(require_results)
+serialize_align :: proc(bit_writer: ^BitWriter) -> bool {
+	return write_align(bit_writer)
+}
+
+@(require_results)
+deserialize_align :: proc(bit_reader: ^BitReader) -> bool {
+	return read_align(bit_reader)
+}
+
 @(test)
 test_bits_required :: proc(t: ^testing.T) {
 	testing.expect_value(t, bits_required(0, 1), 1)
@@ -346,7 +356,7 @@ test_serialize_deserialize_integer :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Flush to memory
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 
 	// Deserialize
@@ -370,7 +380,7 @@ test_serialize_deserialize_negative_integer :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Flush to memory
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 
 	// Deserialize
@@ -405,7 +415,7 @@ test_serialize_deserialize_edge_cases :: proc(t: ^testing.T) {
 		testing.expect(t, res)
 
 		// Flush to memory
-		res = final_flush_to_memory(&writer)
+		res = flush_bits(&writer)
 		testing.expect(t, res)
 
 		// Deserialize
@@ -428,7 +438,7 @@ test_serialize_deserialize_float :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Flush to memory
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 
 	// Deserialize
@@ -463,7 +473,7 @@ test_serialize_deserialize_compressed_float :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Flush to memory
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 
 	// Deserialize
@@ -503,7 +513,7 @@ test_serialize_deserialize_compressed_negative_float :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Flush to memory
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 
 	// Deserialize
@@ -534,7 +544,7 @@ test_serialize_deserialize_vector2 :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Flush to memory
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 
 	// Deserialize
@@ -561,7 +571,7 @@ test_serialize_deserialize_vector3 :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Flush to memory
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 
 	// Deserialize
@@ -597,7 +607,7 @@ test_serialize_deserialize_compressed_vector2 :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Flush to memory
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 
 	// Deserialize
@@ -638,7 +648,7 @@ test_serialize_deserialize_compressed_vector3 :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Flush to memory
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 
 	// Deserialize

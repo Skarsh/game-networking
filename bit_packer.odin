@@ -8,7 +8,7 @@ BitWriter :: struct {
 	scratch:      u64,
 	scratch_bits: u32,
 	word_index:   u32,
-	max_bits:     u32,
+	num_bits:     u32,
 	bits_written: u32,
 }
 
@@ -18,7 +18,7 @@ create_writer :: proc(buffer: []u32) -> BitWriter {
 		scratch      = 0,
 		scratch_bits = 0,
 		word_index   = 0,
-		max_bits     = u32(len(buffer) * 32),
+		num_bits     = u32(len(buffer) * 32),
 		bits_written = 0,
 	}
 	return bit_writer
@@ -44,7 +44,7 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 	}
 
 	// Check if writing these bits would exceed max_bits
-	if writer.word_index * 32 + writer.scratch_bits + bits > writer.max_bits {
+	if writer.word_index * 32 + writer.scratch_bits + bits > writer.num_bits {
 		return false
 	}
 
@@ -82,9 +82,9 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 
 // Write the remaining bits to memory
 @(require_results)
-final_flush_to_memory :: proc(writer: ^BitWriter) -> bool {
+flush_bits :: proc(writer: ^BitWriter) -> bool {
 
-	if writer.word_index * 32 + writer.scratch_bits > writer.max_bits {
+	if writer.word_index * 32 + writer.scratch_bits > writer.num_bits {
 		return false
 	}
 
@@ -107,6 +107,43 @@ write_align :: proc(writer: ^BitWriter) -> bool {
 		return success
 	}
 	return true
+}
+
+
+@(require_results)
+write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
+	bytes := u32(len(data))
+	bits_written_word_remainder := writer.bits_written % 32
+
+	assert(get_align_bits(writer) == 0)
+	assert(writer.bits_written + bytes * 8 <= writer.num_bits)
+	assert(
+		bits_written_word_remainder == 0 ||
+		bits_written_word_remainder == 8 ||
+		bits_written_word_remainder == 16 ||
+		bits_written_word_remainder == 24,
+	)
+
+	// Whaaaat???? Understand this better
+	head_bytes := (4 - (bits_written_word_remainder) / 8) % 4
+	if head_bytes > bytes {
+		head_bytes = bytes
+	}
+
+	flush_bits(writer)
+
+	num_words := (bytes - head_bytes) / 4
+	if num_words > 0 {
+		assert(bits_written_word_remainder == 0)
+	}
+
+	return false
+}
+
+// TODO(Thomas): Needs proper unit testing
+@(require_results)
+get_align_bits :: proc(writer: ^BitWriter) -> u32 {
+	return (8 - (writer.bits_written % 8)) % 8
 }
 
 BitReader :: struct {
@@ -365,7 +402,7 @@ test_write_flush :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.scratch, 0b1101)
 	testing.expect_value(t, writer.scratch_bits, 4)
 	testing.expect_value(t, writer.bits_written, 36)
-	res = final_flush_to_memory(&writer)
+	res = flush_bits(&writer)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.buffer[1], 0b1101)
 	testing.expect_value(t, writer.scratch, 0)
@@ -393,7 +430,7 @@ test_write_flush_on_last_word :: proc(t: ^testing.T) {
 	testing.expect_value(t, writer.bits_written, (99 * 32) + 3)
 	testing.expect(t, res)
 
-	success := final_flush_to_memory(&writer)
+	success := flush_bits(&writer)
 	testing.expect(t, success)
 	testing.expect_value(t, writer.buffer[99], 0x0000_0003)
 	testing.expect_value(t, writer.word_index, 100)
@@ -705,7 +742,7 @@ test_write_then_read_simple :: proc(t: ^testing.T) {
 	testing.expect(t, success)
 	success = write_bits(&writer, 0b11110000, 8)
 	testing.expect(t, success)
-	success = final_flush_to_memory(&writer)
+	success = flush_bits(&writer)
 	testing.expect(t, success)
 
 	reader := create_reader(buffer[:])
@@ -725,7 +762,7 @@ test_write_then_read_full_word :: proc(t: ^testing.T) {
 	writer := create_writer(buffer)
 	success := write_bits(&writer, 0xAABB_CCDD, 32)
 	testing.expect(t, success)
-	success = final_flush_to_memory(&writer)
+	success = flush_bits(&writer)
 	testing.expect(t, success)
 
 	reader := create_reader(buffer[:])
@@ -745,7 +782,7 @@ test_write_then_read_across_word_boundary :: proc(t: ^testing.T) {
 	testing.expect(t, success)
 	success = write_bits(&writer, 0xBBBB, 16)
 	testing.expect(t, success)
-	success = final_flush_to_memory(&writer)
+	success = flush_bits(&writer)
 	testing.expect(t, success)
 
 	reader := create_reader(buffer[:])
@@ -775,7 +812,7 @@ test_write_then_read_mixed_bit_lengths :: proc(t: ^testing.T) {
 	testing.expect(t, success)
 	success = write_bits(&writer, 0xABCD, 16)
 	testing.expect(t, success)
-	success = final_flush_to_memory(&writer)
+	success = flush_bits(&writer)
 	testing.expect(t, success)
 
 	reader := create_reader(buffer[:])
@@ -805,7 +842,7 @@ test_write_then_read_full_buffer :: proc(t: ^testing.T) {
 	testing.expect(t, success)
 	success = write_bits(&writer, 0xAAAA_AAAA, 32)
 	testing.expect(t, success)
-	success = final_flush_to_memory(&writer)
+	success = flush_bits(&writer)
 	testing.expect(t, success)
 
 	reader := create_reader(buffer[:])
@@ -824,20 +861,36 @@ test_write_then_read_full_buffer :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_read_align :: proc(t: ^testing.T) {
-	buffer := []u32{0, 0}
-	writer := create_writer(buffer)
+test_read_align_one_bit :: proc(t: ^testing.T) {
+	buffer := []u32{0b0000_0001}
 	reader := create_reader(buffer)
-
-	res := write_bits(&writer, 1, 1)
-	testing.expect(t, res)
-	res = write_align(&writer)
-	testing.expect(t, res)
-	res = final_flush_to_memory(&writer)
-	testing.expect(t, res)
 
 	value, success := read_bits(&reader, 1)
 	testing.expect(t, success)
 	testing.expect_value(t, value, 1)
+	testing.expect_value(t, reader.bits_read, 1)
 
+	success = read_align(&reader)
+	testing.expect(t, success)
+	testing.expect_value(t, reader.bits_read, 8)
+}
+
+// NOTE(Thomas): Don't fix this failing test until 
+// we understand how bits_read should be incremented in
+// regards to read_align
+@(test)
+test_read_align_two_bit_set_should_fail :: proc(t: ^testing.T) {
+	buffer := []u32{0b0010_0001}
+	reader := create_reader(buffer)
+
+	value, success := read_bits(&reader, 1)
+	testing.expect(t, success)
+	testing.expect_value(t, value, 1)
+	testing.expect_value(t, reader.bits_read, 1)
+
+	success = read_align(&reader)
+	testing.expect(t, !success)
+
+	// TODO(Thomas): This is the one that fails
+	testing.expect_value(t, reader.bits_read, 1)
 }
