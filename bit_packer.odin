@@ -964,3 +964,77 @@ test_get_align :: proc(t: ^testing.T) {
 	align = get_align_bits(&writer)
 	testing.expect_value(t, align, 7)
 }
+
+@(test)
+test_write_bytes :: proc(t: ^testing.T) {
+	// Test case 1: Write a small amount of data
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer)
+		data := []u8{0xAA, 0xBB, 0xCC}
+		success := write_bytes(&writer, data)
+		testing.expect(
+			t,
+			success,
+			"Writing small amount of data should succeed",
+		)
+		success = flush_bits(&writer)
+		testing.expect(t, success)
+		testing.expect_value(t, writer.bits_written, 24)
+		testing.expect_value(t, writer.buffer[0], 0x00CCBBAA)
+	}
+
+	// Test case 2: Write data that aligns perfectly with word boundaries
+	{
+		buffer := []u32{0, 0}
+		writer := create_writer(buffer)
+		data := []u8{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}
+		success := write_bytes(&writer, data)
+		testing.expect(t, success, "Writing word-aligned data should succeed")
+		testing.expect_value(t, writer.bits_written, 64)
+		testing.expect_value(t, writer.buffer[0], 0x44332211)
+		testing.expect_value(t, writer.buffer[1], 0x88776655)
+	}
+
+	// Test case 3: Write data that doesn't align with word boundaries
+	{
+		buffer := []u32{0, 0}
+		writer := create_writer(buffer)
+		data := []u8{0xAA, 0xBB, 0xCC, 0xDD, 0xEE}
+		success := write_bytes(&writer, data)
+		testing.expect(
+			t,
+			success,
+			"Writing non-word-aligned data should succeed",
+		)
+		success = flush_bits(&writer)
+		testing.expect(t, success)
+		testing.expect_value(t, writer.bits_written, 40)
+		testing.expect_value(t, writer.buffer[0], 0xDDCCBBAA)
+		testing.expect_value(t, writer.buffer[1] & 0x00FF, 0x00EE)
+	}
+
+	// Test case 4: Write data that exceeds buffer capacity
+	// TODO(Thomas): This triggers assert so it panics. Reintroduce when asserts are removed.
+	//{
+	//	buffer := []u32{0}
+	//	writer := create_writer(buffer)
+	//	data := []u8{0x11, 0x22, 0x33, 0x44, 0x55}
+	//	success := write_bytes(&writer, data)
+	//	testing.expect(
+	//		t,
+	//		!success,
+	//		"Writing data exceeding buffer capacity should fail",
+	//	)
+	//}
+
+	//// Test case 5: Write empty data
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer)
+		data := []u8{}
+		success := write_bytes(&writer, data)
+		testing.expect(t, success, "Writing empty data should succeed")
+		testing.expect_value(t, writer.bits_written, 0)
+	}
+}
