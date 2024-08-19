@@ -72,7 +72,7 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 
 		// Store the value of the scratch into the buffer. We AND (&) mask here with the lower 32-bits
 		// so that we only write those lower 32 bits into the buffer at the word index 
-		writer.buffer[writer.word_index] = u32(writer.scratch & 0xFF_FF_FF_FF)
+		writer.buffer[writer.word_index] = u32(writer.scratch & 0xFFFF_FFFF)
 		writer.word_index += 1
 		writer.scratch >>= 32
 		writer.scratch_bits -= 32
@@ -90,7 +90,7 @@ flush_bits :: proc(writer: ^BitWriter) -> bool {
 	}
 
 	if writer.scratch_bits > 0 {
-		writer.buffer[writer.word_index] = u32(writer.scratch & 0xFF_FF_FF_FF)
+		writer.buffer[writer.word_index] = u32(writer.scratch & 0xFFFF_FFFF)
 		writer.word_index += 1
 	}
 
