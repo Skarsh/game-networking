@@ -116,7 +116,8 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 	bytes := u32(len(data))
 
 	assert(get_align_bits(writer.bits_written) == 0)
-	assert(writer.bits_written + bytes * 8 <= writer.num_bits)
+	target_bits_to_write := writer.bits_written + (bytes * 8)
+	assert(target_bits_to_write <= writer.num_bits)
 	assert(
 		(writer.bits_written % 32) == 0 ||
 		(writer.bits_written % 32) == 8 ||
@@ -124,8 +125,12 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 		(writer.bits_written % 32) == 24,
 	)
 
-	// Whaaaat???? Understand this better
-	head_bytes := (4 - ((writer.bits_written % 32)) / 8) % 4
+	// This calulates the amount of bytes necessary to reach the next word byte boundary
+	// Step 1: Calculate the remainder of bits past the current word: writer.bits_written % 32
+	// Step 2: Calculate the remainder of bytes pas the current word: (writer.bits_written % 32) / 8 
+	// Step 3: Calculate how many bytes we're away from the next word boundary: 4 - (writer.bits_written % 32) / 8
+	// Step 4: Calculate the amount of padding required to align the next word boundary: (4 - (writer.bits_written % 32) / 8) % 4
+	head_bytes := (4 - (writer.bits_written % 32) / 8) % 4
 	if head_bytes > bytes {
 		head_bytes = bytes
 	}
@@ -176,7 +181,7 @@ BitReader :: struct {
 	buffer:       []u32,
 	scratch:      u64,
 	scratch_bits: u32,
-	total_bits:   u32,
+	num_bits:     u32,
 	bits_read:    u32,
 	word_index:   u32,
 }
@@ -186,7 +191,7 @@ create_reader :: proc(buffer: []u32) -> BitReader {
 		buffer       = buffer,
 		scratch      = 0,
 		scratch_bits = 0,
-		total_bits   = u32(len(buffer) * 32),
+		num_bits     = u32(len(buffer) * 32),
 		bits_read    = 0,
 		word_index   = 0,
 	}
@@ -209,7 +214,7 @@ read_bits :: proc(
 		return 0, false
 	}
 
-	if bits > 32 || reader.bits_read + bits > reader.total_bits {
+	if bits > 32 || reader.bits_read + bits > reader.num_bits {
 		return 0, false
 	}
 
@@ -253,6 +258,72 @@ read_align :: proc(reader: ^BitReader) -> bool {
 			return false
 		}
 	}
+	return true
+}
+
+@(require_results)
+read_bytes :: proc(reader: ^BitReader, data: []u8, bytes: u32) -> bool {
+	assert(get_align_bits(reader.bits_read) == 0)
+	assert(reader.bits_read + bytes * 8 <= reader.num_bits)
+	assert(
+		reader.bits_read % 32 == 0 ||
+		reader.bits_read % 32 == 8 ||
+		reader.bits_read % 32 == 16 ||
+		reader.bits_read % 32 == 24,
+	)
+
+	// TODO(Thomas): This is pretty much exactly the same as for the write, should pull out into its own function
+	head_bytes := (4 - (reader.bits_read % 32) / 8) % 4
+	if head_bytes > bytes {
+		head_bytes = bytes
+	}
+
+	for i in 0 ..< head_bytes {
+		value, success := read_bits(reader, 8)
+		if !success {
+			return false
+		}
+		// Safety: safe to cast to u8 since we only read 8 bits 
+		data[i] = u8(value)
+	}
+
+	// TODO(Thomas): Figure out what the actual purpose of this is
+	if head_bytes == bytes {
+		//NOTE(Thomas): The original implementation just returns void here,
+		return false
+	}
+
+	assert(get_align_bits(reader.bits_read) == 0)
+
+	num_words := (bytes - head_bytes) / 4
+	copy_len := int(num_words) * 4
+	if num_words > 0 {
+		assert((reader.bits_read % 32) == 0)
+		mem.copy(
+			&data[head_bytes],
+			&reader.buffer[reader.word_index],
+			copy_len,
+		)
+		reader.bits_read += num_words * 32
+		reader.word_index += num_words
+		reader.scratch_bits = 0
+	}
+
+	assert(get_align_bits(reader.num_bits) == 0)
+
+	tail_start := head_bytes + num_words * 4
+	tail_bytes := bytes - tail_start
+	assert(tail_bytes >= 0 && tail_bytes < 4)
+	for i in 0 ..< tail_bytes {
+		value, success := read_bits(reader, 8)
+		if !success {
+			return false
+		}
+	}
+
+	assert(get_align_bits(reader.num_bits) == 0)
+	assert((head_bytes + num_words * 4 + tail_bytes) == bytes)
+
 	return true
 }
 
