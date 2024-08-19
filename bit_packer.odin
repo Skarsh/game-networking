@@ -115,7 +115,7 @@ write_align :: proc(writer: ^BitWriter) -> bool {
 write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 	bytes := u32(len(data))
 
-	assert(get_align_bits(writer) == 0)
+	assert(get_align_bits(writer.bits_written) == 0)
 	assert(writer.bits_written + bytes * 8 <= writer.num_bits)
 	assert(
 		(writer.bits_written % 32) == 0 ||
@@ -149,7 +149,7 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 		writer.scratch = 0
 	}
 
-	assert(get_align_bits(writer) == 0)
+	assert(get_align_bits(writer.bits_written) == 0)
 	tail_start := head_bytes + (num_words * 4)
 	tail_bytes := bytes - tail_start
 	assert(tail_bytes >= 0 && tail_bytes < 4)
@@ -160,7 +160,7 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 		}
 	}
 
-	assert(get_align_bits(writer) == 0)
+	assert(get_align_bits(writer.bits_written) == 0)
 	assert(head_bytes + (num_words * 4) + tail_bytes == bytes)
 
 	return true
@@ -168,8 +168,8 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 
 // TODO(Thomas): Needs proper unit testing
 @(require_results)
-get_align_bits :: proc(writer: ^BitWriter) -> u32 {
-	return (8 - (writer.bits_written % 8)) % 8
+get_align_bits :: proc(bits: u32) -> u32 {
+	return (8 - (bits % 8)) % 8
 }
 
 BitReader :: struct {
@@ -926,42 +926,42 @@ test_get_align :: proc(t: ^testing.T) {
 	buffer := []u32{0, 0, 0, 0}
 	writer := create_writer(buffer)
 
-	align := get_align_bits(&writer)
+	align := get_align_bits(writer.bits_written)
 	testing.expect_value(t, align, 0)
 
 	res := write_bits(&writer, 1, 1)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.bits_written, 1)
 
-	align = get_align_bits(&writer)
+	align = get_align_bits(writer.bits_written)
 	testing.expect_value(t, align, 7)
 
 	res = write_bits(&writer, 1, 6)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.bits_written, 7)
 
-	align = get_align_bits(&writer)
+	align = get_align_bits(writer.bits_written)
 	testing.expect_value(t, align, 1)
 
 	res = write_bits(&writer, 1, 1)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.bits_written, 8)
 
-	align = get_align_bits(&writer)
+	align = get_align_bits(writer.bits_written)
 	testing.expect_value(t, align, 0)
 
 	res = write_bits(&writer, 1, 32)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.bits_written, 40)
 
-	align = get_align_bits(&writer)
+	align = get_align_bits(writer.bits_written)
 	testing.expect_value(t, align, 0)
 
 	res = write_bits(&writer, 1, 1)
 	testing.expect(t, res)
 	testing.expect_value(t, writer.bits_written, 41)
 
-	align = get_align_bits(&writer)
+	align = get_align_bits(writer.bits_written)
 	testing.expect_value(t, align, 7)
 }
 
