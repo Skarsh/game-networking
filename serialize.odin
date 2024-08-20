@@ -324,6 +324,29 @@ deserialize_align :: proc(bit_reader: ^BitReader) -> bool {
 	return read_align(bit_reader)
 }
 
+@(require_results)
+serialize_bytes :: proc(bit_writer: ^BitWriter, data: []u8) -> bool {
+	assert(len(data) > 0)
+	if !serialize_align(bit_writer) {
+		return false
+	}
+	return write_bytes(bit_writer, data)
+}
+
+@(require_results)
+deserialize_bytes :: proc(
+	bit_reader: ^BitReader,
+	data: []u8,
+	bytes: u32,
+) -> bool {
+	assert(len(data) > 0)
+	assert(bytes > 0)
+	if !deserialize_align(bit_reader) {
+		return false
+	}
+	return read_bytes(bit_reader, data, bytes)
+}
+
 @(test)
 test_bits_required :: proc(t: ^testing.T) {
 	testing.expect_value(t, bits_required(0, 1), 1)
@@ -665,4 +688,71 @@ test_serialize_deserialize_compressed_vector3 :: proc(t: ^testing.T) {
 		vec3_approx_equal(original_vec, deserialized_vec, resolution),
 		fmt.tprintf("Expected %v, got %v", original_vec, deserialized_vec),
 	)
+}
+
+@(test)
+test_serialize_deserialize_bytes :: proc(t: ^testing.T) {
+	// Test case 1: Serialize and deserialize a small array
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		write_data := []u8{0xCC, 0xBB, 0xDD, 0xAA}
+
+		success := serialize_bytes(&writer, write_data)
+		testing.expect(t, success)
+
+		read_data: [4]u8
+
+		success = deserialize_bytes(&reader, read_data[:], 4)
+		testing.expect(t, success)
+
+		testing.expect_value(t, write_data[0], read_data[0])
+		testing.expect_value(t, write_data[1], read_data[1])
+		testing.expect_value(t, write_data[2], read_data[2])
+		testing.expect_value(t, write_data[3], read_data[3])
+	}
+
+	// Test case 2: Serialize and deserialize a larger byte array
+	{
+		num_words :: 4
+		buffer: [num_words]u32
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		byte_len :: num_words * size_of(u32)
+		write_data := []u8 {
+			0x00,
+			0x11,
+			0x22,
+			0x33,
+			0x44,
+			0x55,
+			0x66,
+			0x77,
+			0x88,
+			0x99,
+			0xAA,
+			0xBB,
+			0xCC,
+			0xDD,
+			0xEE,
+			0xFF,
+		}
+
+		read_data: [byte_len]u8
+
+		// Serialize
+		success := serialize_bytes(&writer, write_data)
+		testing.expect(t, success)
+
+		// Deserialize
+		success = deserialize_bytes(&reader, read_data[:], byte_len)
+		testing.expect(t, success)
+
+		for i in 0 ..< byte_len {
+			testing.expect_value(t, write_data[i], read_data[i])
+		}
+	}
 }
