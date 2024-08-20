@@ -133,6 +133,7 @@ deserialize_compressed_float :: proc(
 
 Vector2 :: [2]f32
 Vector3 :: [3]f32
+Quaternion :: [4]f32
 
 @(require_results)
 serialize_vector2 :: proc(bit_writer: ^BitWriter, value: Vector2) -> bool {
@@ -312,6 +313,57 @@ deserialize_compressed_vector3 :: proc(
 	}
 
 	return Vector3{x, y, z}, true
+}
+
+@(require_results)
+serialize_quaternion :: proc(
+	bit_writer: ^BitWriter,
+	quat: Quaternion,
+) -> bool {
+	if !serialize_float(bit_writer, quat[0]) {
+		return false
+	}
+
+	if !serialize_float(bit_writer, quat[1]) {
+		return false
+	}
+
+	if !serialize_float(bit_writer, quat[2]) {
+		return false
+	}
+
+	if !serialize_float(bit_writer, quat[3]) {
+		return false
+	}
+
+	return true
+}
+
+// TODO(Thomas): Add serialize and deserialize procedures for compressed_quaternion
+
+@(require_results)
+deserialize_quaternion :: proc(bit_reader: ^BitReader) -> (Quaternion, bool) {
+	x, success1 := deserialize_float(bit_reader)
+	if !success1 {
+		return Quaternion{}, false
+	}
+
+	y, success2 := deserialize_float(bit_reader)
+	if !success2 {
+		return Quaternion{}, false
+	}
+
+	z, success3 := deserialize_float(bit_reader)
+	if !success3 {
+		return Quaternion{}, false
+	}
+
+	w, success4 := deserialize_float(bit_reader)
+	if !success4 {
+		return Quaternion{}, false
+	}
+
+	return Quaternion{x, y, z, w}, true
 }
 
 @(require_results)
@@ -688,6 +740,22 @@ test_serialize_deserialize_compressed_vector3 :: proc(t: ^testing.T) {
 		vec3_approx_equal(original_vec, deserialized_vec, resolution),
 		fmt.tprintf("Expected %v, got %v", original_vec, deserialized_vec),
 	)
+}
+
+@(test)
+test_serialize_deserialize_quaternion :: proc(t: ^testing.T) {
+	buffer := []u32{0, 0, 0, 0}
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+
+	original_quat := Quaternion{3.14159, 2.71828, 1.61803, 1.41421}
+
+	res := serialize_quaternion(&writer, original_quat)
+	testing.expect(t, res)
+
+	deserialized_quat, success := deserialize_quaternion(&reader)
+	testing.expect(t, success)
+	testing.expect_value(t, original_quat, deserialized_quat)
 }
 
 @(test)
