@@ -319,6 +319,8 @@ read_bytes :: proc(reader: ^BitReader, data: []u8, bytes: u32) -> bool {
 		if !success {
 			return false
 		}
+		// Safety: Safe to cast to u8 here since we only read 8 bits into value
+		data[tail_start + i] = u8(value)
 	}
 
 	assert(get_align_bits(reader.num_bits) == 0)
@@ -1107,5 +1109,94 @@ test_write_bytes :: proc(t: ^testing.T) {
 		success := write_bytes(&writer, data)
 		testing.expect(t, success, "Writing empty data should succeed")
 		testing.expect_value(t, writer.bits_written, 0)
+	}
+}
+
+@(test)
+test_read_bytes :: proc(t: ^testing.T) {
+	// Test case 1: Read small amount of data that aligns with word boundary
+	{
+		buffer := []u32{0xDDCCBBAA}
+		reader := create_reader(buffer)
+		data := []u8{0, 0, 0, 0}
+		success := read_bytes(&reader, data, u32(len(data)))
+		testing.expect(t, success, "Reading word-aligned data should succeed")
+		testing.expect_value(t, data[0], 0xAA)
+		testing.expect_value(t, data[1], 0xBB)
+		testing.expect_value(t, data[2], 0xCC)
+		testing.expect_value(t, data[3], 0xDD)
+
+		// Asserting reader state
+		testing.expect_value(t, reader.bits_read, reader.num_bits)
+	}
+	// Test case 2: Read non-word aligned data
+	{
+		buffer := []u32{0xDDCCBBAA}
+		reader := create_reader(buffer)
+		data := []u8{0, 0, 0}
+		success := read_bytes(&reader, data, 3)
+		testing.expect(
+			t,
+			success,
+			"Reading non-word-aligned data should succeed",
+		)
+		testing.expect_value(t, data[0], 0xAA)
+		testing.expect_value(t, data[1], 0xBB)
+		testing.expect_value(t, data[2], 0xCC)
+
+		// Asserting reader state
+		testing.expect_value(t, reader.bits_read, 3 * 8)
+	}
+	// Test case 3: Read overlapping words that align
+	{
+		buffer := []u32{0xDDCCBBAA, 0x99887766}
+		reader := create_reader(buffer)
+		data: [8]u8
+		success := read_bytes(&reader, data[:], 8)
+		testing.expect(
+			t,
+			success,
+			"Reading non-word-aligned data should succeed",
+		)
+		// First word
+		testing.expect_value(t, data[0], 0xAA)
+		testing.expect_value(t, data[1], 0xBB)
+		testing.expect_value(t, data[2], 0xCC)
+		testing.expect_value(t, data[3], 0xDD)
+
+		// Second word
+		testing.expect_value(t, data[4], 0x66)
+		testing.expect_value(t, data[5], 0x77)
+		testing.expect_value(t, data[6], 0x88)
+		testing.expect_value(t, data[7], 0x99)
+
+		// Asserting reader state
+		testing.expect_value(t, reader.bits_read, reader.num_bits)
+	}
+
+	// Test case 3: Read overlapping words that doest not align
+	{
+		buffer := []u32{0xDDCCBBAA, 0x99887766}
+		reader := create_reader(buffer)
+		data: [8]u8
+		success := read_bytes(&reader, data[:], 7)
+		testing.expect(
+			t,
+			success,
+			"Reading non-word-aligned data should succeed",
+		)
+		// First word
+		testing.expect_value(t, data[0], 0xAA)
+		testing.expect_value(t, data[1], 0xBB)
+		testing.expect_value(t, data[2], 0xCC)
+		testing.expect_value(t, data[3], 0xDD)
+
+		// Second word
+		testing.expect_value(t, data[4], 0x66)
+		testing.expect_value(t, data[5], 0x77)
+		testing.expect_value(t, data[6], 0x88)
+
+		// Asserting reader state
+		testing.expect_value(t, reader.bits_read, 7 * 8)
 	}
 }

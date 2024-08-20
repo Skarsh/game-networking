@@ -23,4 +23,16 @@ main :: proc() {
 
 	fmt.printf("Original u32 slice %v\n", u32_slice)
 	fmt.printf("Transmuted byte slice %v\n", byte_slice)
+
+
+	buffer := []u32{0xDDCCBBAA}
+	fmt.println("buffer: ", buffer)
+	reader := create_reader(buffer)
+	data := []u8{0, 0, 0}
+	success := read_bytes(&reader, data, 3)
+
+	if success {
+		fmt.println("")
+	}
+
 }
