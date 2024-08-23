@@ -198,6 +198,10 @@ create_reader :: proc(buffer: []u32) -> BitReader {
 	return bit_reader
 }
 
+get_reader_bits_remaining :: proc(bit_reader: BitReader) -> u32 {
+	return bit_reader.num_bits - bit_reader.bits_read
+}
+
 @(require_results)
 read_bits :: proc(
 	reader: ^BitReader,
