@@ -134,11 +134,21 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 	if head_bytes > bytes {
 		head_bytes = bytes
 	}
+	for i in 0 ..< head_bytes {
+		if !write_bits(writer, u32(data[i]), 8) {
+			return false
+		}
+	}
+	// TODO(Thomas): Convince ourselves of why returning True here is correct
+	if head_bytes == bytes {
+		return true
+	}
 
-	success := flush_bits(writer)
-	if !success {
+	if !flush_bits(writer) {
 		return false
 	}
+
+	assert(get_align_bits(writer.bits_written) == 0)
 
 	num_words := (bytes - head_bytes) / 4
 	if num_words > 0 {
@@ -159,8 +169,7 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 	tail_bytes := bytes - tail_start
 	assert(tail_bytes >= 0 && tail_bytes < 4)
 	for i in 0 ..< tail_bytes {
-		success = write_bits(writer, u32(data[tail_start + i]), 8)
-		if !success {
+		if !write_bits(writer, u32(data[tail_start + i]), 8) {
 			return false
 		}
 	}
