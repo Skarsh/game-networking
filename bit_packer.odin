@@ -211,6 +211,10 @@ get_reader_bits_remaining :: proc(bit_reader: BitReader) -> u32 {
 	return bit_reader.num_bits - bit_reader.bits_read
 }
 
+get_writer_bits_remaining :: proc(bit_writer: BitWriter) -> u32 {
+	return bit_writer.num_bits - bit_writer.bits_written
+}
+
 @(require_results)
 read_bits :: proc(
 	reader: ^BitReader,
