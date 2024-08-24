@@ -2,3 +2,8 @@
 *.exe
 *.pdb
 *.rdbg
+
+# Exe file on linux
+udp
+
+.vscode/
