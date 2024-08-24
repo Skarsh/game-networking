@@ -35,4 +35,26 @@ main :: proc() {
 		fmt.println("")
 	}
 
+
+	packet_buffer := make([]u32, 32)
+	defer delete(packet_buffer)
+	packet_writer := create_writer(packet_buffer)
+	packet_reader := create_reader(packet_buffer)
+
+	fragment_packet := FragmentPacket {
+		fragment_size = 72,
+		crc32         = 42,
+		sequence      = 16,
+		packet_type   = .PacketFragment,
+		fragment_id   = 14,
+		num_fragments = 3,
+	}
+
+	fmt.println("len(PacketType): ", len(PacketType))
+
+	res := serialize_fragment_packet(&packet_writer, &fragment_packet)
+	assert(res)
+
+	packet, packet_success := deserialize_fragment_packet(&packet_reader)
+	assert(packet_success)
 }
