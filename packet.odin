@@ -101,20 +101,20 @@ deserialize_fragment_packet :: proc(
 		0,
 		len(PacketType) - 1,
 	)
-	if !packet_type_success { return {}, false }
+	if !packet_type_success {return {}, false}
 
 	packet_type := PacketType(packet_type_value)
 
-	if packet_type != PacketType.PacketFragment { return {}, true }
+	if packet_type != PacketType.PacketFragment {return {}, true}
 
 	fragment_id, success_fragment_id := read_bits(bit_reader, 8)
-	if !success_fragment_id { return {}, false }
+	if !success_fragment_id {return {}, false}
 
 	num_fragments, success_num_fragments := read_bits(bit_reader, 8)
-	if !success_num_fragments { return {}, false }
+	if !success_num_fragments {return {}, false}
 
 	success_align := deserialize_align(bit_reader)
-	if !success_align { return {}, false }
+	if !success_align {return {}, false}
 
 	assert((get_reader_bits_remaining(bit_reader^) % 8) == 0)
 	fragment_size := get_reader_bits_remaining(bit_reader^) / 8
@@ -129,7 +129,7 @@ deserialize_fragment_packet :: proc(
 		fragment_packet.fragment_data[:],
 		u32(fragment_size),
 	)
-	if !success_fragment_data { return {}, false }
+	if !success_fragment_data {return {}, false}
 
 	fragment_packet.crc32 = crc32
 	fragment_packet.sequence = u16(sequence)
