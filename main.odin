@@ -1,14 +1,91 @@
 package main
 
+import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/rand"
 import "core:mem"
+
+TestData :: union {
+	Vector2,
+	Vector3,
+	Quaternion,
+}
+
+random_test_data_type :: proc(lo: f32, hi: f32) -> TestData {
+	info := type_info_of(TestData)
+	variants_len := 0
+
+	#partial switch v in info.variant {
+	case runtime.Type_Info_Named:
+		#partial switch vv in v.base.variant {
+		case runtime.Type_Info_Union:
+			variants_len = len(vv.variants)
+		case:
+			unreachable()
+		}
+	case:
+		unreachable()
+	}
+
+	random := rand.int_max(variants_len)
+	switch random {
+	case 0:
+		return random_vector2(lo, hi)
+	case 1:
+		return random_vector3(lo, hi)
+	case 2:
+		return random_quaternion(lo, hi)
+	case:
+		unreachable()
+	}
+}
+
+random_vector2 :: proc(lo: f32, hi: f32) -> Vector2 {
+	return Vector2{rand.float32_range(lo, hi), rand.float32_range(lo, hi)}
+}
+
+random_vector3 :: proc(lo: f32, hi: f32) -> Vector3 {
+	return Vector3 {
+		rand.float32_range(lo, hi),
+		rand.float32_range(lo, hi),
+		rand.float32_range(lo, hi),
+	}
+}
+
+random_quaternion :: proc(lo: f32, hi: f32) -> Quaternion {
+	return Quaternion {
+		rand.float32_range(lo, hi),
+		rand.float32_range(lo, hi),
+		rand.float32_range(lo, hi),
+		rand.float32_range(lo, hi),
+	}
+}
+
+run_serialization_tests :: proc() {
+	log.info("Serialization strategies integration tests started")
+	stack: [dynamic]TestData
+	num_iterations := 100
+
+	for i in 0 ..< num_iterations {
+		// Make a random object of the different possible TestData types
+		test_data := random_test_data_type(0, 100)
+		append(&stack, test_data)
+	}
+
+	for i in 0 ..< num_iterations {
+		test_data := pop(&stack)
+		fmt.println("test_data: ", test_data)
+	}
+}
 
 main :: proc() {
 	logger := log.create_console_logger()
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
+
+	run_serialization_tests()
 
 	min := math.min(int)
 	max := math.max(int)
