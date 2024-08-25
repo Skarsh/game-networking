@@ -1,10 +1,15 @@
 package main
 
 import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:mem"
 
 main :: proc() {
+	logger := log.create_console_logger()
+	context.logger = logger
+	defer log.destroy_console_logger(logger)
+
 	min := math.min(int)
 	max := math.max(int)
 	diff := max - min
@@ -57,4 +62,7 @@ main :: proc() {
 
 	packet, packet_success := deserialize_fragment_packet(&packet_reader)
 	assert(packet_success)
+
+
+	log.info("This is a info log statement")
 }
