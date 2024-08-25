@@ -1,5 +1,7 @@
 package main
 
+import "core:log"
+import "core:mem"
 import "core:testing"
 
 PacketBufferSize :: 256
@@ -143,18 +145,180 @@ deserialize_fragment_packet :: proc(
 }
 
 PacketBufferEntry :: struct {
-	sequence:           u32, // packet sequence number
+	sequence:           u16, // packet sequence number
 	num_fragments:      u32, // number of fragments for this packet
 	received_fragments: u32, // number of received fragments so far
-	fragment_size:      [MaxFragmentsPerPacket]i32, // size of fragment n in bytes
+	fragment_size:      [MaxFragmentsPerPacket]int, // size of fragment n in bytes
 	fragment_data:      [MaxFragmentsPerPacket][]u8, // point to data for fragment n
 }
 
+// TODO(Thomas): Valid can be turned into a bitset probably
 PacketBuffer :: struct {
 	current_sequence:       u16,
 	num_buffered_fragments: int,
 	valid:                  [PacketBufferSize]bool,
 	entries:                [PacketBufferSize]PacketBufferEntry,
+}
+
+// Advance the current sequence for the packet buffer forward.
+// Removes old packet entries and frees their fragments
+advance_sequence :: proc(packet_buffer: ^PacketBuffer, sequence: u16) {
+	if !sequence_greater_than(packet_buffer.current_sequence, sequence) {
+		return
+	}
+
+	oldest_sequence: u16 = sequence - PacketBufferSize + 1
+	for i in 0 ..< PacketBufferSize {
+		if packet_buffer.valid[i] {
+			if sequence_less_than(
+				packet_buffer.entries[i].sequence,
+				oldest_sequence,
+			) {
+				log.infof(
+					"remove old packet entry %v",
+					packet_buffer.entries[i].sequence,
+				)
+				for j in 0 ..< packet_buffer.entries[i].num_fragments {
+
+					// TODO(Thomas): Think about this part more!!! 
+					// I would prefer to free in blocks / chunks instead of one by one like this.
+					// But we need to explore more of the code / solution first.
+					delete(packet_buffer.entries[i].fragment_data[j])
+					assert(packet_buffer.num_buffered_fragments > 0)
+					packet_buffer.num_buffered_fragments -= 1
+				}
+			}
+			// TODO(Thomas): Think about this more too! Not sure if we want to do it like this
+			mem.set(&packet_buffer.entries[i], 0, size_of(PacketBufferEntry))
+			packet_buffer.valid[i] = false
+		}
+	}
+	packet_buffer.current_sequence = sequence
+}
+
+// Process packet fragment on receiver side.
+// Stores each fragment ready to receive the whole packet once all fragments for the packet are received.
+// If any fragment is dropped, fragments are not resent, the whole packet is dropped.
+
+// NOTE: This function is fairly complicated because it must handle all possible cases
+//       of malicously constructed packets attempting to overflow and corrupt the packet buffer!
+process_packet :: proc(
+	packet_buffer: ^PacketBuffer,
+	fragment_data: []u8,
+	fragment_size: int,
+	packet_sequence: u16,
+	fragment_id: u32,
+	num_fragments_in_packet: u32,
+) -> bool {
+	assert(len(fragment_data) > 0)
+
+	// fragment size is <= zero? discard the fragment
+
+	if fragment_size <= 0 {
+		return false
+	}
+
+	// fragment size exceeds max fragment size? discard the fragment
+
+	if fragment_size > MaxFragmentSize {
+		return false
+	}
+
+	// num fragments outside of range? discard the fragment
+
+	if num_fragments_in_packet <= 0 ||
+	   num_fragments_in_packet > MaxFragmentsPerPacket {
+		return false
+	}
+
+	// fragment index out for range? discard the fragment
+
+	if fragment_id < 0 || fragment_id >= num_fragments_in_packet {
+		return false
+	}
+
+	// if this is not the last fragment in the packet and fragment size is not equal to MaxFragmentSize, discard the fragment
+	if fragment_id != num_fragments_in_packet - 1 &&
+	   fragment_size != MaxFragmentSize {
+		return false
+	}
+
+	// packet sequence number wildly out of range from the current sequence? discard the fragment
+
+	if sequence_difference(packet_sequence, packet_buffer.current_sequence) >
+	   1024 {
+		return false
+	}
+
+	// if the entry exists, but has a different sequence number, discard the fragment
+	index := packet_sequence % PacketBufferSize
+
+	if packet_buffer.valid[index] &&
+	   packet_buffer.entries[index].sequence != packet_sequence {
+		return false
+	}
+
+	// if the entry does not exist, add an entry for this sequence # and set total fragments 
+
+	if !packet_buffer.valid[index] {
+		advance_sequence(packet_buffer, packet_sequence)
+		packet_buffer.entries[index].sequence = packet_sequence
+		packet_buffer.entries[index].num_fragments = num_fragments_in_packet
+
+		// IMPORTANT: Should have already been cleared to zeros in "advance_sequence" procedure
+		assert(packet_buffer.entries[index].received_fragments == 0)
+		packet_buffer.valid[index] = true
+	}
+
+	// at this point the entry must exist and have the same sequence number as the fragment
+
+	assert(packet_buffer.valid[index])
+	assert(packet_buffer.entries[index].sequence == packet_sequence)
+
+	// if the total number fragments is different for this packet vs. the entry, discard the fragment
+
+	if num_fragments_in_packet != packet_buffer.entries[index].num_fragments {
+		return false
+	}
+
+	// if this fragment has already been received, ignore it because it must have come from a duplicate packet 
+
+	assert(fragment_id < num_fragments_in_packet)
+	assert(fragment_id < MaxFragmentsPerPacket)
+	assert(num_fragments_in_packet <= MaxFragmentsPerPacket)
+
+	// TODO(Thomas): What is the purpose of this??
+	if packet_buffer.entries[index].fragment_size[fragment_id] == 1 {
+		return false
+	}
+
+	// add the fragment to the packet buffer
+
+	log.infof(
+		"Added fragment %v of packet %v to buffer",
+		fragment_id,
+		packet_sequence,
+	)
+
+	assert(fragment_size > 0)
+	assert(fragment_size <= MaxFragmentSize)
+
+	packet_buffer.entries[index].fragment_size[fragment_id] = fragment_size
+	packet_buffer.entries[index].fragment_data = make([]u8, fragment_size)
+	mem.copy(
+		&packet_buffer.entries[index].fragment_data[fragment_id],
+		raw_data(fragment_data),
+		fragment_size,
+	)
+	packet_buffer.entries[index].received_fragments += 1
+
+	assert(
+		packet_buffer.entries[index].received_fragments <=
+		packet_buffer.entries[index].num_fragments,
+	)
+	packet_buffer.num_buffered_fragments += 1
+
+	return true
 }
 
 @(test)
