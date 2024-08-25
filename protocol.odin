@@ -1,5 +1,6 @@
 package main
 
+import "core:hash"
 import "core:math"
 import "core:testing"
 
@@ -34,6 +35,10 @@ sequence_difference :: proc(s1: u16, s2: u16) -> int {
 	return signed_s1 - signed_s2
 }
 
+
+calculate_crc32 :: proc(data: []byte) -> u32 {
+	return hash.crc32(data)
+}
 
 @(test)
 test_sequence_greater_than :: proc(t: ^testing.T) {

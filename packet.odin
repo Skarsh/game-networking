@@ -148,7 +148,7 @@ PacketBufferEntry :: struct {
 	sequence:           u16, // packet sequence number
 	num_fragments:      u32, // number of fragments for this packet
 	received_fragments: u32, // number of received fragments so far
-	fragment_size:      [MaxFragmentsPerPacket]int, // size of fragment n in bytes
+	fragment_size:      [MaxFragmentsPerPacket]u32, // size of fragment n in bytes
 	fragment_data:      [MaxFragmentsPerPacket][]u8, // point to data for fragment n
 }
 
@@ -202,10 +202,10 @@ advance_sequence :: proc(packet_buffer: ^PacketBuffer, sequence: u16) {
 
 // NOTE: This function is fairly complicated because it must handle all possible cases
 //       of malicously constructed packets attempting to overflow and corrupt the packet buffer!
-process_packet :: proc(
+process_fragment :: proc(
 	packet_buffer: ^PacketBuffer,
 	fragment_data: []u8,
-	fragment_size: int,
+	fragment_size: u32,
 	packet_sequence: u16,
 	fragment_id: u32,
 	num_fragments_in_packet: u32,
@@ -308,7 +308,7 @@ process_packet :: proc(
 	mem.copy(
 		&packet_buffer.entries[index].fragment_data[fragment_id],
 		raw_data(fragment_data),
-		fragment_size,
+		int(fragment_size),
 	)
 	packet_buffer.entries[index].received_fragments += 1
 
@@ -317,6 +317,53 @@ process_packet :: proc(
 		packet_buffer.entries[index].num_fragments,
 	)
 	packet_buffer.num_buffered_fragments += 1
+
+	return true
+}
+
+process_packet :: proc(packet_buffer: ^PacketBuffer, data: []u8) -> bool {
+	u32_data := transmute([]u32)mem.slice_ptr(&data[0], len(data))
+	reader := create_reader(u32_data)
+
+	fragment_packet, success := deserialize_fragment_packet(&reader)
+	if !success {
+		log.errorf("Fragment packet failed to serialize")
+		return false
+	}
+
+	protocol_id := ProtocolId
+	crc32 := calculate_crc32(
+		transmute([]byte)mem.slice_ptr(&protocol_id, size_of(protocol_id)),
+	)
+	// TODO(Thomas): More crc32 stuff here
+
+	if crc32 != fragment_packet.crc32 {
+		log.errorf(
+			"Corrupt packet: expected crc32 %v, got %v",
+			crc32,
+			fragment_packet.crc32,
+		)
+	}
+
+	if fragment_packet.packet_type == PacketType.PacketFragment {
+		return process_fragment(
+			packet_buffer,
+			data[PacketFragmentHeaderBytes:],
+			fragment_packet.fragment_size,
+			fragment_packet.sequence,
+			u32(fragment_packet.fragment_id),
+			u32(fragment_packet.num_fragments),
+		)
+	} else {
+		return process_fragment(
+			packet_buffer,
+			data,
+			u32(len(data)),
+			fragment_packet.sequence,
+			0,
+			1,
+		)
+	}
 
 	return true
 }

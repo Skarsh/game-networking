@@ -65,4 +65,14 @@ main :: proc() {
 
 
 	log.info("This is a info log statement")
+
+	protocol_id: i32 = 4
+	log.info("size_of(protocol_id): ", size_of(protocol_id))
+	log.info(
+		"crc32: ",
+		calculate_crc32(
+			transmute([]byte)mem.slice_ptr(&protocol_id, size_of(protocol_id)),
+		),
+	)
+
 }
