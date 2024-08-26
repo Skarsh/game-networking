@@ -195,6 +195,14 @@ BitReader :: struct {
 	word_index:   u32,
 }
 
+get_writer_bits_remaining :: proc(bit_writer: BitWriter) -> u32 {
+	return bit_writer.num_bits - bit_writer.bits_written
+}
+
+get_writer_bytes_written :: proc(bit_writer: BitWriter) -> u32 {
+	return bit_writer.bits_written / 8
+}
+
 create_reader :: proc(buffer: []u32) -> BitReader {
 	bit_reader := BitReader {
 		buffer       = buffer,
@@ -207,13 +215,6 @@ create_reader :: proc(buffer: []u32) -> BitReader {
 	return bit_reader
 }
 
-get_reader_bits_remaining :: proc(bit_reader: BitReader) -> u32 {
-	return bit_reader.num_bits - bit_reader.bits_read
-}
-
-get_writer_bits_remaining :: proc(bit_writer: BitWriter) -> u32 {
-	return bit_writer.num_bits - bit_writer.bits_written
-}
 
 @(require_results)
 read_bits :: proc(
@@ -344,6 +345,15 @@ read_bytes :: proc(reader: ^BitReader, data: []u8, bytes: u32) -> bool {
 	assert((head_bytes + num_words * 4 + tail_bytes) == bytes)
 
 	return true
+}
+
+
+get_reader_bits_remaining :: proc(bit_reader: BitReader) -> u32 {
+	return bit_reader.num_bits - bit_reader.bits_read
+}
+
+get_reader_bytes_read :: proc(bit_reader: BitReader) -> u32 {
+	return bit_reader.bits_read / 8
 }
 
 @(test)
