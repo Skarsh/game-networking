@@ -63,20 +63,69 @@ random_quaternion :: proc(lo: f32, hi: f32) -> Quaternion {
 	}
 }
 
+serialize_test_data :: proc(
+	bit_writer: ^BitWriter,
+	test_data: TestData,
+) -> bool {
+	switch data in test_data {
+	case Vector2:
+		return serialize_vector2(bit_writer, data)
+	case Vector3:
+		return serialize_vector3(bit_writer, data)
+	case Quaternion:
+		return serialize_quaternion(bit_writer, data)
+	case:
+		unreachable()
+	}
+}
+
+deserialize_test_data :: proc(
+	bit_reader: ^BitReader,
+	test_data: TestData,
+) -> bool {
+	switch data in test_data {
+	case Vector2:
+		value, success := deserialize_vector2(bit_reader)
+		assert(success)
+		assert(value == data)
+		return true
+	case Vector3:
+		value, success := deserialize_vector3(bit_reader)
+		assert(success)
+		assert(value == data)
+		return true
+	case Quaternion:
+		value, success := deserialize_quaternion(bit_reader)
+		assert(success)
+		assert(value == data)
+		return true
+	case:
+		unreachable()
+	}
+}
+
 run_serialization_tests :: proc() {
 	log.info("Serialization strategies integration tests started")
 	stack: [dynamic]TestData
-	num_iterations := 100
+	num_iterations := 10_000
+
+	buffer := make([]u32, 100_000)
+	defer delete(buffer)
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
 
 	for i in 0 ..< num_iterations {
 		// Make a random object of the different possible TestData types
 		test_data := random_test_data_type(0, 100)
+		success := serialize_test_data(&writer, test_data)
+		assert(success)
 		append(&stack, test_data)
 	}
 
 	for i in 0 ..< num_iterations {
-		test_data := pop(&stack)
-		fmt.println("test_data: ", test_data)
+		test_data := stack[i]
+		success := deserialize_test_data(&reader, test_data)
+		assert(success)
 	}
 }
 
