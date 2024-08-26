@@ -6,6 +6,9 @@ import "core:log"
 import "core:math"
 import "core:math/rand"
 import "core:mem"
+import "core:mem/virtual"
+
+ByteBufferSize :: 100
 
 ByteBuffer :: struct {
 	data: []u8,
@@ -33,6 +36,7 @@ TestData :: union {
 	Vector2,
 	Vector3,
 	Quaternion,
+	ByteBuffer,
 }
 
 random_test_data_type :: proc(lo: f32, hi: f32) -> TestData {
@@ -59,6 +63,8 @@ random_test_data_type :: proc(lo: f32, hi: f32) -> TestData {
 		return random_vector3(lo, hi)
 	case 2:
 		return random_quaternion(lo, hi)
+	case 3:
+		return random_byte_buffer(ByteBufferSize)
 	case:
 		unreachable()
 	}
@@ -66,6 +72,9 @@ random_test_data_type :: proc(lo: f32, hi: f32) -> TestData {
 
 random_byte_buffer :: proc(size: u32) -> ByteBuffer {
 	data := make([]u8, size)
+	for i in 0 ..< len(data) {
+		data[i] = u8(rand.int_max(256))
+	}
 	return ByteBuffer{data}
 }
 
@@ -101,6 +110,8 @@ serialize_test_data :: proc(
 		return serialize_vector3(bit_writer, data)
 	case Quaternion:
 		return serialize_quaternion(bit_writer, data)
+	case ByteBuffer:
+		return serialize_bytes(bit_writer, data.data)
 	case:
 		unreachable()
 	}
@@ -116,33 +127,52 @@ deserialize_test_data :: proc(
 	switch data in test_data {
 	case Vector2:
 		value, success := deserialize_vector2(bit_reader)
-		assert(success)
-		assert(value == data)
-		return value, true
+		assert(success, "Failed to deserialize Vector2")
+		assert(value == data, "Vector2's are not equal")
+		return value, success
 	case Vector3:
 		value, success := deserialize_vector3(bit_reader)
-		assert(success)
-		assert(value == data)
-		return value, true
+		assert(success, "Failed to deserialize Vector3")
+		assert(value == data, "Vector3's are not equal")
+		return value, success
 	case Quaternion:
 		value, success := deserialize_quaternion(bit_reader)
-		assert(success)
-		assert(value == data)
-		return value, true
+		assert(success, "Failed to deserialize Quaternion")
+		assert(value == data, "Quaterions are not equal")
+		return value, success
+	case ByteBuffer:
+		byte_buffer := ByteBuffer {
+			data = make([]u8, ByteBufferSize),
+		}
+		success := deserialize_bytes(
+			bit_reader,
+			byte_buffer.data,
+			ByteBufferSize,
+		)
+		assert(success, "Failed to deserialize bytes")
+		assert(
+			compare_byte_buffers(byte_buffer, data),
+			"Byte buffers are not equal",
+		)
+		return byte_buffer, success
 	case:
 		unreachable()
 	}
 }
 
+// TOOD(Thomas): Think about allocations here, this is done very hacky and dirty
 run_serialization_tests :: proc() {
 	log.info("Serialization strategies integration tests started")
+
 	stack: [dynamic]TestData
 	num_iterations := 10_000
 
 	buffer := make([]u32, 100_000)
 	defer delete(buffer)
+
 	writer := create_writer(buffer)
 	reader := create_reader(buffer)
+
 
 	lo: f32 = -1_000_000
 	hi: f32 = 1_000_000
@@ -151,15 +181,28 @@ run_serialization_tests :: proc() {
 		// Make a random object of the different possible TestData types
 		test_data := random_test_data_type(lo, hi)
 		success := serialize_test_data(&writer, test_data)
-		assert(success)
+		assert(
+			success,
+			fmt.tprintf("Failed to serialize test_data: %v", test_data),
+		)
 		append(&stack, test_data)
 	}
 
 	for i in 0 ..< num_iterations {
 		test_data := stack[i]
-		_, success := deserialize_test_data(&reader, test_data)
-		assert(success)
+		value, success := deserialize_test_data(&reader, test_data)
+		assert(
+			success,
+			fmt.tprintf("Failed to deserialize test_data: %v", value),
+		)
 	}
+
+	assert(
+		writer.bits_written == reader.bits_read,
+		"Bits written is not equal to bits read",
+	)
+
+	fmt.println("writer bytes written ", get_writer_bytes_written(writer))
 }
 
 main :: proc() {
