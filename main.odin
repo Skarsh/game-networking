@@ -82,23 +82,26 @@ serialize_test_data :: proc(
 deserialize_test_data :: proc(
 	bit_reader: ^BitReader,
 	test_data: TestData,
-) -> bool {
+) -> (
+	TestData,
+	bool,
+) {
 	switch data in test_data {
 	case Vector2:
 		value, success := deserialize_vector2(bit_reader)
 		assert(success)
 		assert(value == data)
-		return true
+		return value, true
 	case Vector3:
 		value, success := deserialize_vector3(bit_reader)
 		assert(success)
 		assert(value == data)
-		return true
+		return value, true
 	case Quaternion:
 		value, success := deserialize_quaternion(bit_reader)
 		assert(success)
 		assert(value == data)
-		return true
+		return value, true
 	case:
 		unreachable()
 	}
@@ -114,9 +117,12 @@ run_serialization_tests :: proc() {
 	writer := create_writer(buffer)
 	reader := create_reader(buffer)
 
+	lo: f32 = -1_000_000
+	hi: f32 = 1_000_000
+
 	for i in 0 ..< num_iterations {
 		// Make a random object of the different possible TestData types
-		test_data := random_test_data_type(0, 100)
+		test_data := random_test_data_type(lo, hi)
 		success := serialize_test_data(&writer, test_data)
 		assert(success)
 		append(&stack, test_data)
@@ -124,7 +130,7 @@ run_serialization_tests :: proc() {
 
 	for i in 0 ..< num_iterations {
 		test_data := stack[i]
-		success := deserialize_test_data(&reader, test_data)
+		_, success := deserialize_test_data(&reader, test_data)
 		assert(success)
 	}
 }
