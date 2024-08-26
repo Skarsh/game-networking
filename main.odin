@@ -7,6 +7,28 @@ import "core:math"
 import "core:math/rand"
 import "core:mem"
 
+ByteBuffer :: struct {
+	data: []u8,
+}
+
+compare_byte_buffers :: proc(
+	byte_buffer1: ByteBuffer,
+	byte_buffer2: ByteBuffer,
+) -> bool {
+	if len(byte_buffer1.data) != len(byte_buffer2.data) {
+		return false
+	}
+
+	buffer_len := len(byte_buffer1.data)
+	for i in 0 ..< buffer_len {
+		if byte_buffer1.data[i] != byte_buffer2.data[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
 TestData :: union {
 	Vector2,
 	Vector3,
@@ -40,6 +62,11 @@ random_test_data_type :: proc(lo: f32, hi: f32) -> TestData {
 	case:
 		unreachable()
 	}
+}
+
+random_byte_buffer :: proc(size: u32) -> ByteBuffer {
+	data := make([]u8, size)
+	return ByteBuffer{data}
 }
 
 random_vector2 :: proc(lo: f32, hi: f32) -> Vector2 {
@@ -207,4 +234,15 @@ main :: proc() {
 		),
 	)
 
+	test_buffer_1 := []u8{0, 1, 2, 3}
+	test_buffer_2 := []u8{0, 1, 2, 3}
+
+	byte_buffer_1 := ByteBuffer {
+		data = test_buffer_1,
+	}
+	byte_buffer_2 := ByteBuffer {
+		data = test_buffer_2,
+	}
+
+	assert(compare_byte_buffers(byte_buffer_1, byte_buffer_2))
 }
