@@ -160,36 +160,30 @@ deserialize_test_data :: proc(
 	}
 }
 
-// TOOD(Thomas): Think about allocations here, this is done very hacky and dirty
 run_serialization_tests :: proc() {
 	log.info("Serialization strategies integration tests started")
 
-	stack: [dynamic]TestData
-	num_iterations := 10_000
-
-	buffer := make([]u32, 100_000)
+	buffer := make([]u32, 1_000_000)
 	defer delete(buffer)
 
 	writer := create_writer(buffer)
 	reader := create_reader(buffer)
 
-
 	lo: f32 = -1_000_000
 	hi: f32 = 1_000_000
 
-	for i in 0 ..< num_iterations {
-		// Make a random object of the different possible TestData types
-		test_data := random_test_data_type(lo, hi)
-		success := serialize_test_data(&writer, test_data)
+	tests_data := make([]TestData, 100_000)
+	for i in 0 ..< len(tests_data) {
+		tests_data[i] = random_test_data_type(lo, hi)
+		success := serialize_test_data(&writer, tests_data[i])
 		assert(
 			success,
-			fmt.tprintf("Failed to serialize test_data: %v", test_data),
+			fmt.tprintf("Failed to serialize test_data: %v", tests_data[i]),
 		)
-		append(&stack, test_data)
 	}
 
-	for i in 0 ..< num_iterations {
-		test_data := stack[i]
+	for i in 0 ..< len(tests_data) {
+		test_data := tests_data[i]
 		value, success := deserialize_test_data(&reader, test_data)
 		assert(
 			success,
