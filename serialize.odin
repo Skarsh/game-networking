@@ -7,6 +7,33 @@ import "core:testing"
 
 EPSILON :: 1e-6
 
+CompressedInteger :: struct {
+	value: i32,
+	min:   i32,
+	max:   i32,
+}
+
+CompressedFloat :: struct {
+	value:      f32,
+	min:        f32,
+	max:        f32,
+	resolution: f32,
+}
+
+CompressedVector2 :: struct {
+	value:      Vector2,
+	min:        f32,
+	max:        f32,
+	resolution: f32,
+}
+
+CompressedVector3 :: struct {
+	value:      Vector3,
+	min:        f32,
+	max:        f32,
+	resolution: f32,
+}
+
 approx_equal :: proc "contextless" (a, b: f32, epsilon: f32) -> bool {
 	return math.abs(a - b) < epsilon
 }

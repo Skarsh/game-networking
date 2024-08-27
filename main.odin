@@ -37,9 +37,10 @@ TestData :: union {
 	Vector3,
 	Quaternion,
 	ByteBuffer,
+	CompressedVector2,
 }
 
-random_test_data_type :: proc(lo: f32, hi: f32) -> TestData {
+random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> TestData {
 	info := type_info_of(TestData)
 	variants_len := 0
 
@@ -65,6 +66,8 @@ random_test_data_type :: proc(lo: f32, hi: f32) -> TestData {
 		return random_quaternion(lo, hi)
 	case 3:
 		return random_byte_buffer(ByteBufferSize)
+	case 4:
+		return random_compressed_vector2(lo, hi, resolution)
 	case:
 		unreachable()
 	}
@@ -90,6 +93,31 @@ random_vector3 :: proc(lo: f32, hi: f32) -> Vector3 {
 	}
 }
 
+random_compressed_vector2 :: proc(
+	lo: f32,
+	hi: f32,
+	resolution: f32,
+) -> CompressedVector2 {
+	val1 := rand.float32_range(lo, hi)
+	val2 := rand.float32_range(lo, hi)
+
+	min: f32
+	max: f32
+
+	if val1 > val2 {
+		min = val2
+		max = val1
+	} else {
+		min = val1
+		max = val2
+	}
+
+	value := random_vector2(min, max)
+
+	return CompressedVector2{value, min, max, resolution}
+
+}
+
 random_quaternion :: proc(lo: f32, hi: f32) -> Quaternion {
 	return Quaternion {
 		rand.float32_range(lo, hi),
@@ -112,6 +140,14 @@ serialize_test_data :: proc(
 		return serialize_quaternion(bit_writer, data)
 	case ByteBuffer:
 		return serialize_bytes(bit_writer, data.data)
+	case CompressedVector2:
+		return serialize_compressed_vector2(
+			bit_writer,
+			data.value,
+			data.min,
+			data.max,
+			data.resolution,
+		)
 	case:
 		unreachable()
 	}
@@ -128,17 +164,38 @@ deserialize_test_data :: proc(
 	case Vector2:
 		value, success := deserialize_vector2(bit_reader)
 		assert(success, "Failed to deserialize Vector2")
-		assert(value == data, "Vector2's are not equal")
+		assert(
+			value == data,
+			fmt.tprintf(
+				"Vector2's are not equal, expected %v, but got %v",
+				data,
+				value,
+			),
+		)
 		return value, success
 	case Vector3:
 		value, success := deserialize_vector3(bit_reader)
 		assert(success, "Failed to deserialize Vector3")
-		assert(value == data, "Vector3's are not equal")
+		assert(
+			value == data,
+			fmt.tprintf(
+				"Vector3's are not equal, expected %v, but got %v",
+				data,
+				value,
+			),
+		)
 		return value, success
 	case Quaternion:
 		value, success := deserialize_quaternion(bit_reader)
 		assert(success, "Failed to deserialize Quaternion")
-		assert(value == data, "Quaterions are not equal")
+		assert(
+			value == data,
+			fmt.tprintf(
+				"Quaternions are not equal, expected %v, but got %v",
+				data,
+				value,
+			),
+		)
 		return value, success
 	case ByteBuffer:
 		byte_buffer := ByteBuffer {
@@ -155,6 +212,24 @@ deserialize_test_data :: proc(
 			"Byte buffers are not equal",
 		)
 		return byte_buffer, success
+	case CompressedVector2:
+		value, success := deserialize_compressed_vector2(
+			bit_reader,
+			data.min,
+			data.max,
+			data.resolution,
+		)
+		assert(success, "Failed to deserialize compressed Vector2")
+		assert(
+			vec2_approx_equal(value, data.value, data.resolution),
+			fmt.tprintf(
+				"Compressed Vector2's are not equal, expected %v but got %v",
+				data.value,
+				value,
+			),
+		)
+		return CompressedVector2{value, data.min, data.max, data.resolution},
+			success
 	case:
 		unreachable()
 	}
@@ -171,10 +246,11 @@ run_serialization_tests :: proc() {
 
 	lo: f32 = -1_000_000
 	hi: f32 = 1_000_000
+	resolution: f32 = 0.01
 
 	tests_data := make([]TestData, 100_000)
 	for i in 0 ..< len(tests_data) {
-		tests_data[i] = random_test_data_type(lo, hi)
+		tests_data[i] = random_test_data_type(lo, hi, resolution)
 		success := serialize_test_data(&writer, tests_data[i])
 		assert(
 			success,
