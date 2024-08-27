@@ -1,5 +1,6 @@
 
 *.exe
+*.so
 *.pdb
 *.rdbg
 
@@ -7,3 +8,4 @@
 udp
 
 .vscode/
+
