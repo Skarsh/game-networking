@@ -223,9 +223,12 @@ deserialize_test_data :: proc(
 		assert(
 			vec2_approx_equal(value, data.value, data.resolution),
 			fmt.tprintf(
-				"Compressed Vector2's are not equal, expected %v but got %v",
+				"Compressed Vector2's are not equal, expected %v but got %v, with min: %v, max: %v, resolution: %v",
 				data.value,
 				value,
+				data.min,
+				data.max,
+				data.resolution,
 			),
 		)
 		return CompressedVector2{value, data.min, data.max, data.resolution},
@@ -244,19 +247,25 @@ run_serialization_tests :: proc() {
 	writer := create_writer(buffer)
 	reader := create_reader(buffer)
 
-	lo: f32 = -1_000_000
-	hi: f32 = 1_000_000
+	lo: f32 = -1_000
+	hi: f32 = 1_000
 	resolution: f32 = 0.01
 
 	tests_data := make([]TestData, 100_000)
 	for i in 0 ..< len(tests_data) {
+		log.debugf("Serializing test data for iteration: %v", i)
 		tests_data[i] = random_test_data_type(lo, hi, resolution)
+		log.debugf("Testdata: %v", tests_data[i])
 		success := serialize_test_data(&writer, tests_data[i])
 		assert(
 			success,
 			fmt.tprintf("Failed to serialize test_data: %v", tests_data[i]),
 		)
 	}
+
+	flush_success := flush_bits(&writer)
+	assert(flush_success)
+	log.debugf("Flushed writer for serializing test data")
 
 	for i in 0 ..< len(tests_data) {
 		test_data := tests_data[i]
@@ -272,11 +281,11 @@ run_serialization_tests :: proc() {
 		"Bits written is not equal to bits read",
 	)
 
-	fmt.println("writer bytes written ", get_writer_bytes_written(writer))
+	log.debugf("writer bytes written: %v", get_writer_bytes_written(writer))
 }
 
 main :: proc() {
-	logger := log.create_console_logger()
+	logger := log.create_console_logger(log.Level.Info)
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 

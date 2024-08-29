@@ -728,6 +728,7 @@ test_serialize_deserialize_compressed_vector2 :: proc(t: ^testing.T) {
 	)
 }
 
+
 @(test)
 test_serialize_deserialize_compressed_vector3 :: proc(t: ^testing.T) {
 	buffer := []u32{0, 0, 0}
