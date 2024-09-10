@@ -390,5 +390,5 @@ test_serialize_deserialize_fragment_packet :: proc(t: ^testing.T) {
 	packet, success := deserialize_fragment_packet(&reader)
 	testing.expect(t, success)
 
-	testing.expect_value(t, fragment_packet, packet)
+	testing.expect_value(t, packet, fragment_packet)
 }
