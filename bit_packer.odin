@@ -81,7 +81,8 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 	return true
 }
 
-// Write the remaining bits to memory
+// Write the remaining bits in the scratch to the buffer.
+// Resets scratch and scratch_bits.
 @(require_results)
 flush_bits :: proc(writer: ^BitWriter) -> bool {
 
@@ -123,19 +124,8 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 	assert(get_align_bits(writer.bits_written) == 0)
 	target_bits_to_write := writer.bits_written + (bytes * 8)
 	assert(target_bits_to_write <= writer.num_bits)
-	assert(
-		(writer.bits_written % 32) == 0 ||
-		(writer.bits_written % 32) == 8 ||
-		(writer.bits_written % 32) == 16 ||
-		(writer.bits_written % 32) == 24,
-	)
 
-	// This calulates the amount of bytes necessary to reach the next word byte boundary
-	// Step 1: Calculate the remainder of bits past the current word: writer.bits_written % 32
-	// Step 2: Calculate the remainder of bytes past the current word: (writer.bits_written % 32) / 8 
-	// Step 3: Calculate how many bytes we're away from the next word boundary: 4 - (writer.bits_written % 32) / 8
-	// Step 4: Calculate the amount of padding required to align the next word boundary: (4 - (writer.bits_written % 32) / 8) % 4
-	head_bytes := (4 - (writer.bits_written % 32) / 8) % 4
+	head_bytes := calculate_head_bytes(writer.bits_written)
 	if head_bytes > bytes {
 		head_bytes = bytes
 	}
@@ -146,6 +136,7 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 			return false
 		}
 	}
+
 	// If head_bytes is equal to the bytes, that means that the next word boundary 
 	// is also the end of all we have to write. So we return success true here.
 	// NOTE: It's not necessary to flush before returning because we've written
@@ -298,15 +289,8 @@ read_align :: proc(reader: ^BitReader) -> bool {
 read_bytes :: proc(reader: ^BitReader, data: []u8, bytes: u32) -> bool {
 	assert(get_align_bits(reader.bits_read) == 0)
 	assert(reader.bits_read + bytes * 8 <= reader.num_bits)
-	assert(
-		reader.bits_read % 32 == 0 ||
-		reader.bits_read % 32 == 8 ||
-		reader.bits_read % 32 == 16 ||
-		reader.bits_read % 32 == 24,
-	)
 
-	// TODO(Thomas): This is pretty much exactly the same as for the write, should pull out into its own function
-	head_bytes := (4 - (reader.bits_read % 32) / 8) % 4
+	head_bytes := calculate_head_bytes(reader.bits_read)
 	if head_bytes > bytes {
 		head_bytes = bytes
 	}
@@ -369,6 +353,25 @@ get_reader_bits_remaining :: proc(bit_reader: BitReader) -> u32 {
 
 get_reader_bytes_read :: proc(bit_reader: BitReader) -> u32 {
 	return bit_reader.bits_read / 8
+}
+
+// Calulates the amount of bytes necessary to reach the next word byte boundary
+// NOTE: This assumes that the bits passed in are byte aligned,
+// meaning that for x = 8, 16, 24 and 32 then num_bits % x == 0
+calculate_head_bytes :: proc(num_bits: u32) -> u32 {
+	assert(
+		num_bits % 32 == 0 ||
+		num_bits % 32 == 8 ||
+		num_bits % 32 == 16 ||
+		num_bits % 32 == 24,
+	)
+	// This calulates the amount of bytes necessary to reach the next word byte boundary
+	// Step 1: Calculate the remainder of bits past the current word: writer.bits_written % 32
+	// Step 2: Calculate the remainder of bytes past the current word: (writer.bits_written % 32) / 8 
+	// Step 3: Calculate how many bytes we're away from the next word boundary: 4 - (writer.bits_written % 32) / 8
+	// Step 4: Calculate the amount of padding required to align the next word boundary: (4 - (writer.bits_written % 32) / 8) % 4
+	head_bytes := (4 - (num_bits % 32) / 8) % 4
+	return head_bytes
 }
 
 @(test)
@@ -1075,6 +1078,44 @@ test_get_align :: proc(t: ^testing.T) {
 
 	align = get_align_bits(writer.bits_written)
 	testing.expect_value(t, align, 7)
+}
+
+@(test)
+test_calculate_head_bytes :: proc(t: ^testing.T) {
+	// Test case 1: 32 bits -- Perfectly aligned with word boundary
+	{
+		bits: u32 = 32
+		head_bytes := calculate_head_bytes(bits)
+		testing.expect_value(t, head_bytes, 0)
+	}
+
+	// Test case 2: 0 bits -- Perfectly aligned with word boundary
+	{
+		bits: u32 = 0
+		head_bytes := calculate_head_bytes(bits)
+		testing.expect_value(t, head_bytes, 0)
+	}
+
+	// Test case 3: 8 bits -- 24 bits = 3 bytes away from word boundary
+	{
+		bits: u32 = 8
+		head_bytes := calculate_head_bytes(bits)
+		testing.expect_value(t, head_bytes, 3)
+	}
+
+	// Test case 4: 16 bits -- 16 bits = 2 bytes away from word boundary
+	{
+		bits: u32 = 16
+		head_bytes := calculate_head_bytes(bits)
+		testing.expect_value(t, head_bytes, 2)
+	}
+
+	// Test case 4: 24 bits -- 8 bits = 1 byte away from word boundary
+	{
+		bits: u32 = 24
+		head_bytes := calculate_head_bytes(bits)
+		testing.expect_value(t, head_bytes, 1)
+	}
 }
 
 @(test)
