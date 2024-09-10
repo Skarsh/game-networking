@@ -99,6 +99,9 @@ flush_bits :: proc(writer: ^BitWriter) -> bool {
 	return true
 }
 
+// Write reminder bytes until byte aligned boundary
+// One thing to note is that the writer.bits_written will now be increased
+// up until the next byte boundary, even if this returns false.
 @(require_results)
 write_align :: proc(writer: ^BitWriter) -> bool {
 	remainder_bits := writer.bits_written % 8
@@ -261,6 +264,9 @@ read_bits :: proc(
 	return value, true
 }
 
+// Read remaining bits until byte aligned boundary
+// One thing to note is that the reader.bits_read will now be increased
+// up until the next byte boundary, even if this returns false.
 @(require_results)
 read_align :: proc(reader: ^BitReader) -> bool {
 	remainder_bits := reader.bits_read % 8
@@ -1001,9 +1007,6 @@ test_read_align_one_bit :: proc(t: ^testing.T) {
 	testing.expect_value(t, reader.bits_read, 8)
 }
 
-// NOTE(Thomas): Don't fix this failing test until 
-// we understand how bits_read should be incremented in
-// regards to read_align
 @(test)
 test_read_align_two_bit_set_should_fail :: proc(t: ^testing.T) {
 	buffer := []u32{0b0010_0001}
@@ -1017,8 +1020,8 @@ test_read_align_two_bit_set_should_fail :: proc(t: ^testing.T) {
 	success = read_align(&reader)
 	testing.expect(t, !success)
 
-	// TODO(Thomas): This is the one that fails
-	testing.expect_value(t, reader.bits_read, 1)
+	// NOTE: It's now aligned up to the next byte boundary
+	testing.expect_value(t, reader.bits_read, 8)
 }
 
 @(test)
