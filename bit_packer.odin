@@ -85,6 +85,8 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 @(require_results)
 flush_bits :: proc(writer: ^BitWriter) -> bool {
 
+	// If we have surpassed the max amounts that can possibly be written
+	// to the writer we return false.
 	if writer.word_index * 32 + writer.scratch_bits > writer.num_bits {
 		return false
 	}
@@ -99,7 +101,7 @@ flush_bits :: proc(writer: ^BitWriter) -> bool {
 	return true
 }
 
-// Write reminder bytes until byte aligned boundary
+// Write remaining bytes until byte aligned boundary
 // One thing to note is that the writer.bits_written will now be increased
 // up until the next byte boundary, even if this returns false.
 @(require_results)
@@ -137,12 +139,17 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 	if head_bytes > bytes {
 		head_bytes = bytes
 	}
+
+	// Write all the head bytes (bytes necessary to reach the next word (32 bits / 4 byte) boundary)
 	for i in 0 ..< head_bytes {
 		if !write_bits(writer, u32(data[i]), 8) {
 			return false
 		}
 	}
-	// TODO(Thomas): Convince ourselves of why returning True here is correct
+	// If head_bytes is equal to the bytes, that means that the next word boundary 
+	// is also the end of all we have to write. So we return success true here.
+	// NOTE: It's not necessary to flush before returning because we've written
+	// all the data we should, and we're word aligned.
 	if head_bytes == bytes {
 		return true
 	}
