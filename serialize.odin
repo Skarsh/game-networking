@@ -106,6 +106,7 @@ deserialize_float :: proc(bit_reader: ^BitReader) -> (f32, bool) {
 	return transmute(f32)int_value, true
 }
 
+// TODO(Thomas): Thorougly explain this. 
 @(require_results)
 serialize_compressed_float :: proc(
 	bit_writer: ^BitWriter,
@@ -130,6 +131,7 @@ serialize_compressed_float :: proc(
 	return write_bits(bit_writer, integer_value, u32(required_bits))
 }
 
+// TODO(Thomas): Thorougly explain this. 
 @(require_results)
 deserialize_compressed_float :: proc(
 	bit_reader: ^BitReader,
