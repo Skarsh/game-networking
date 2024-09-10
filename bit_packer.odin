@@ -130,7 +130,7 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 
 	// This calulates the amount of bytes necessary to reach the next word byte boundary
 	// Step 1: Calculate the remainder of bits past the current word: writer.bits_written % 32
-	// Step 2: Calculate the remainder of bytes pas the current word: (writer.bits_written % 32) / 8 
+	// Step 2: Calculate the remainder of bytes past the current word: (writer.bits_written % 32) / 8 
 	// Step 3: Calculate how many bytes we're away from the next word boundary: 4 - (writer.bits_written % 32) / 8
 	// Step 4: Calculate the amount of padding required to align the next word boundary: (4 - (writer.bits_written % 32) / 8) % 4
 	head_bytes := (4 - (writer.bits_written % 32) / 8) % 4
