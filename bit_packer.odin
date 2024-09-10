@@ -183,7 +183,9 @@ write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
 	return true
 }
 
-// TODO(Thomas): Needs proper unit testing
+// Get the number of bits until byte aligment
+// E.g (8 - (5 % 8)) % 8 = 3, meaning that there is
+// 3 bits left until we're at the 8 bit aligned byte boundary.
 @(require_results)
 get_align_bits :: proc(bits: u32) -> u32 {
 	return (8 - (bits % 8)) % 8
