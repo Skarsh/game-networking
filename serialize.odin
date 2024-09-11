@@ -428,6 +428,52 @@ deserialize_bytes :: proc(
 	return read_bytes(bit_reader, data, bytes)
 }
 
+@(require_results)
+serialize_string :: proc(bit_writer: ^Bit_Writer, str: string) -> bool {
+	str_bytes := transmute([]u8)str
+	str_length := i32(len(str_bytes))
+	buffer_size := i32(len(bit_writer.buffer))
+	assert(str_length < buffer_size - 1)
+	success := serialize_integer(bit_writer, str_length, 0, buffer_size - 1)
+	if !success {
+		return false
+	}
+	success = serialize_bytes(bit_writer, str_bytes)
+	if !success {
+		return false
+	}
+
+	return true
+}
+
+@(require_results)
+deserialize_string :: proc(bit_reader: ^Bit_Reader) -> (string, bool) {
+	str_len, success := deserialize_integer(
+		bit_reader,
+		0,
+		i32(len(bit_reader.buffer)),
+	)
+	if !success {
+		return "", false
+	}
+
+	str_bytes := make([]u8, str_len)
+	defer delete(str_bytes)
+
+	// Integer Safety: Should be safe to cast to u32 here due to
+	// the number of bytes should always be > 0. Lets assert to be sure.
+	// TODO(Thomas): Remove when stabilized?
+	assert(str_len > 0)
+	str_success := deserialize_bytes(bit_reader, str_bytes[:], u32(str_len))
+	if !str_success {
+		return "", false
+	}
+
+	str := transmute(string)str_bytes
+
+	return str, true
+}
+
 @(test)
 test_bits_required :: proc(t: ^testing.T) {
 	testing.expect_value(t, bits_required(0, 1), 1)
@@ -853,4 +899,23 @@ test_serialize_deserialize_bytes :: proc(t: ^testing.T) {
 			testing.expect_value(t, write_data[i], read_data[i])
 		}
 	}
+}
+
+@(test)
+test_serialize_deserialize_string :: proc(t: ^testing.T) {
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+	str := "hello"
+	success := serialize_string(&writer, str)
+	testing.expect(
+		t,
+		success,
+		"Should be able to serialize the string 'hello'",
+	)
+
+	des_str, str_success := deserialize_string(&reader)
+	testing.expect(t, str_success, "Should be able deserialize string 'hello'")
+	testing.expect_value(t, des_str, str)
 }

@@ -4,6 +4,11 @@ import "core:fmt"
 import "core:mem"
 import "core:testing"
 
+// TODO(Thomas): There are certain things that are related between
+// the Bit_Writer and the Bit_Reader. One example is that the size
+// of the buffer probably should be in sync, since certain de-/serailize
+// proecures actually needs to know, e.g. strings. So unifying them in
+// common struct might be a good idea eventually.
 Bit_Writer :: struct {
 	buffer:       []u32,
 	scratch:      u64,
@@ -191,6 +196,11 @@ get_align_bits :: proc(bits: u32) -> u32 {
 	return (8 - (bits % 8)) % 8
 }
 
+// TODO(Thomas): There are certain things that are related between
+// the Bit_Writer and the Bit_Reader. One example is that the size
+// of the buffer probably should be in sync, since certain de-/serailize
+// proecures actually needs to know, e.g. strings. So unifying them in
+// common struct might be a good idea eventually.
 Bit_Reader :: struct {
 	buffer:       []u32,
 	scratch:      u64,
