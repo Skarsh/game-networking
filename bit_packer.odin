@@ -1196,6 +1196,24 @@ test_write_bytes :: proc(t: ^testing.T) {
 		testing.expect(t, success, "Writing empty data should succeed")
 		testing.expect_value(t, writer.bits_written, 0)
 	}
+
+	// Test case 6: Head bytes = bytes
+	{
+		buffer := []u32{0x0000_0000, 0x0000_0000}
+		writer := create_writer(buffer)
+
+		data: [4]u8
+		success := write_bytes(&writer, data[:1])
+		testing.expect(t, success, "Writing initial one byte should succeed")
+		testing.expect_value(t, writer.bits_written, 8)
+
+		// Now we have set up a situation where head_bytes will be 2 inside of the reader on next read.
+		testing.expect_value(t, calculate_head_bytes(writer.bits_written), 3)
+
+		success_two := write_bytes(&writer, data[1:1 + 2])
+		testing.expect(t, success_two, "Reading next two bytes should succeed")
+		testing.expect_value(t, writer.bits_written, 24)
+	}
 }
 
 @(test)
@@ -1311,7 +1329,7 @@ test_read_bytes :: proc(t: ^testing.T) {
 
 		data: [4]u8
 		success := read_bytes(&reader, data[:], 1)
-		testing.expect(t, success, "Reading initial two bytes should succeed")
+		testing.expect(t, success, "Reading initial one byte should succeed")
 		testing.expect_value(t, reader.bits_read, 8)
 
 		// Now we have set up a situation where head_bytes will be 2 inside of the reader on next read.
