@@ -8,15 +8,15 @@ import "core:math/rand"
 import "core:mem"
 import "core:mem/virtual"
 
-ByteBufferSize :: 100
+BYTE_BUFFER_SIZE :: 100
 
-ByteBuffer :: struct {
+Byte_Buffer :: struct {
 	data: []u8,
 }
 
 compare_byte_buffers :: proc(
-	byte_buffer1: ByteBuffer,
-	byte_buffer2: ByteBuffer,
+	byte_buffer1: Byte_Buffer,
+	byte_buffer2: Byte_Buffer,
 ) -> bool {
 	if len(byte_buffer1.data) != len(byte_buffer2.data) {
 		return false
@@ -32,16 +32,16 @@ compare_byte_buffers :: proc(
 	return true
 }
 
-TestData :: union {
+Test_Data :: union {
 	Vector2,
 	Vector3,
 	Quaternion,
-	ByteBuffer,
-	CompressedVector2,
+	Byte_Buffer,
+	Compressed_Vector2,
 }
 
-random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> TestData {
-	info := type_info_of(TestData)
+random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> Test_Data {
+	info := type_info_of(Test_Data)
 	variants_len := 0
 
 	#partial switch v in info.variant {
@@ -65,7 +65,7 @@ random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> TestData {
 	case 2:
 		return random_quaternion(lo, hi)
 	case 3:
-		return random_byte_buffer(ByteBufferSize)
+		return random_byte_buffer(BYTE_BUFFER_SIZE)
 	case 4:
 		return random_compressed_vector2(lo, hi, resolution)
 	case:
@@ -73,12 +73,12 @@ random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> TestData {
 	}
 }
 
-random_byte_buffer :: proc(size: u32) -> ByteBuffer {
+random_byte_buffer :: proc(size: u32) -> Byte_Buffer {
 	data := make([]u8, size)
 	for i in 0 ..< len(data) {
 		data[i] = u8(rand.int_max(256))
 	}
-	return ByteBuffer{data}
+	return Byte_Buffer{data}
 }
 
 random_vector2 :: proc(lo: f32, hi: f32) -> Vector2 {
@@ -97,7 +97,7 @@ random_compressed_vector2 :: proc(
 	lo: f32,
 	hi: f32,
 	resolution: f32,
-) -> CompressedVector2 {
+) -> Compressed_Vector2 {
 	val1 := rand.float32_range(lo, hi)
 	val2 := rand.float32_range(lo, hi)
 
@@ -114,7 +114,7 @@ random_compressed_vector2 :: proc(
 
 	value := random_vector2(min, max)
 
-	return CompressedVector2{value, min, max, resolution}
+	return Compressed_Vector2{value, min, max, resolution}
 
 }
 
@@ -128,8 +128,8 @@ random_quaternion :: proc(lo: f32, hi: f32) -> Quaternion {
 }
 
 serialize_test_data :: proc(
-	bit_writer: ^BitWriter,
-	test_data: TestData,
+	bit_writer: ^Bit_Writer,
+	test_data: Test_Data,
 ) -> bool {
 	switch data in test_data {
 	case Vector2:
@@ -138,9 +138,9 @@ serialize_test_data :: proc(
 		return serialize_vector3(bit_writer, data)
 	case Quaternion:
 		return serialize_quaternion(bit_writer, data)
-	case ByteBuffer:
+	case Byte_Buffer:
 		return serialize_bytes(bit_writer, data.data)
-	case CompressedVector2:
+	case Compressed_Vector2:
 		return serialize_compressed_vector2(
 			bit_writer,
 			data.value,
@@ -154,10 +154,10 @@ serialize_test_data :: proc(
 }
 
 deserialize_test_data :: proc(
-	bit_reader: ^BitReader,
-	test_data: TestData,
+	bit_reader: ^Bit_Reader,
+	test_data: Test_Data,
 ) -> (
-	TestData,
+	Test_Data,
 	bool,
 ) {
 	switch data in test_data {
@@ -197,14 +197,14 @@ deserialize_test_data :: proc(
 			),
 		)
 		return value, success
-	case ByteBuffer:
-		byte_buffer := ByteBuffer {
-			data = make([]u8, ByteBufferSize),
+	case Byte_Buffer:
+		byte_buffer := Byte_Buffer {
+			data = make([]u8, BYTE_BUFFER_SIZE),
 		}
 		success := deserialize_bytes(
 			bit_reader,
 			byte_buffer.data,
-			ByteBufferSize,
+			BYTE_BUFFER_SIZE,
 		)
 		assert(success, "Failed to deserialize bytes")
 		assert(
@@ -212,7 +212,7 @@ deserialize_test_data :: proc(
 			"Byte buffers are not equal",
 		)
 		return byte_buffer, success
-	case CompressedVector2:
+	case Compressed_Vector2:
 		value, success := deserialize_compressed_vector2(
 			bit_reader,
 			data.min,
@@ -231,7 +231,7 @@ deserialize_test_data :: proc(
 				data.resolution,
 			),
 		)
-		return CompressedVector2{value, data.min, data.max, data.resolution},
+		return Compressed_Vector2{value, data.min, data.max, data.resolution},
 			success
 	case:
 		unreachable()
@@ -251,7 +251,7 @@ run_serialization_tests :: proc() {
 	hi: f32 = 1_000
 	resolution: f32 = 0.01
 
-	tests_data := make([]TestData, 100_000)
+	tests_data := make([]Test_Data, 100_000)
 	for i in 0 ..< len(tests_data) {
 		log.debugf("Serializing test data for iteration: %v", i)
 		tests_data[i] = random_test_data_type(lo, hi, resolution)

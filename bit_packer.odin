@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:mem"
 import "core:testing"
 
-BitWriter :: struct {
+Bit_Writer :: struct {
 	buffer:       []u32,
 	scratch:      u64,
 	scratch_bits: u32,
@@ -13,8 +13,8 @@ BitWriter :: struct {
 	bits_written: u32,
 }
 
-create_writer :: proc(buffer: []u32) -> BitWriter {
-	bit_writer := BitWriter {
+create_writer :: proc(buffer: []u32) -> Bit_Writer {
+	bit_writer := Bit_Writer {
 		buffer       = buffer,
 		scratch      = 0,
 		scratch_bits = 0,
@@ -27,7 +27,7 @@ create_writer :: proc(buffer: []u32) -> BitWriter {
 
 // Write the (n = bits) lowest bits from value to the buffer
 @(require_results)
-write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
+write_bits :: proc(writer: ^Bit_Writer, value: u32, bits: u32) -> bool {
 
 	// NOTE(Thomas): 
 	// Asserting for debugging, probably remove when stable
@@ -84,7 +84,7 @@ write_bits :: proc(writer: ^BitWriter, value: u32, bits: u32) -> bool {
 // Write the remaining bits in the scratch to the buffer.
 // Resets scratch and scratch_bits.
 @(require_results)
-flush_bits :: proc(writer: ^BitWriter) -> bool {
+flush_bits :: proc(writer: ^Bit_Writer) -> bool {
 
 	// If we have surpassed the max amounts that can possibly be written
 	// to the writer we return false.
@@ -106,7 +106,7 @@ flush_bits :: proc(writer: ^BitWriter) -> bool {
 // One thing to note is that the writer.bits_written will now be increased
 // up until the next byte boundary, even if this returns false.
 @(require_results)
-write_align :: proc(writer: ^BitWriter) -> bool {
+write_align :: proc(writer: ^Bit_Writer) -> bool {
 	remainder_bits := writer.bits_written % 8
 	if remainder_bits != 0 {
 		success := write_bits(writer, 0, 8 - remainder_bits)
@@ -118,7 +118,7 @@ write_align :: proc(writer: ^BitWriter) -> bool {
 
 
 @(require_results)
-write_bytes :: proc(writer: ^BitWriter, data: []u8) -> bool {
+write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	bytes := u32(len(data))
 
 	assert(get_align_bits(writer.bits_written) == 0)
@@ -189,7 +189,7 @@ get_align_bits :: proc(bits: u32) -> u32 {
 	return (8 - (bits % 8)) % 8
 }
 
-BitReader :: struct {
+Bit_Reader :: struct {
 	buffer:       []u32,
 	scratch:      u64,
 	scratch_bits: u32,
@@ -198,16 +198,16 @@ BitReader :: struct {
 	word_index:   u32,
 }
 
-get_writer_bits_remaining :: proc(bit_writer: BitWriter) -> u32 {
+get_writer_bits_remaining :: proc(bit_writer: Bit_Writer) -> u32 {
 	return bit_writer.num_bits - bit_writer.bits_written
 }
 
-get_writer_bytes_written :: proc(bit_writer: BitWriter) -> u32 {
+get_writer_bytes_written :: proc(bit_writer: Bit_Writer) -> u32 {
 	return bit_writer.bits_written / 8
 }
 
-create_reader :: proc(buffer: []u32) -> BitReader {
-	bit_reader := BitReader {
+create_reader :: proc(buffer: []u32) -> Bit_Reader {
+	bit_reader := Bit_Reader {
 		buffer       = buffer,
 		scratch      = 0,
 		scratch_bits = 0,
@@ -221,7 +221,7 @@ create_reader :: proc(buffer: []u32) -> BitReader {
 
 @(require_results)
 read_bits :: proc(
-	reader: ^BitReader,
+	reader: ^Bit_Reader,
 	bits: u32,
 ) -> (
 	value: u32,
@@ -268,7 +268,7 @@ read_bits :: proc(
 // One thing to note is that the reader.bits_read will now be increased
 // up until the next byte boundary, even if this returns false.
 @(require_results)
-read_align :: proc(reader: ^BitReader) -> bool {
+read_align :: proc(reader: ^Bit_Reader) -> bool {
 	remainder_bits := reader.bits_read % 8
 	if remainder_bits != 0 {
 		value, success := read_bits(reader, 8 - remainder_bits)
@@ -286,7 +286,7 @@ read_align :: proc(reader: ^BitReader) -> bool {
 }
 
 @(require_results)
-read_bytes :: proc(reader: ^BitReader, data: []u8, bytes: u32) -> bool {
+read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	assert(get_align_bits(reader.bits_read) == 0)
 	assert(reader.bits_read + bytes * 8 <= reader.num_bits)
 
@@ -347,11 +347,11 @@ read_bytes :: proc(reader: ^BitReader, data: []u8, bytes: u32) -> bool {
 }
 
 
-get_reader_bits_remaining :: proc(bit_reader: BitReader) -> u32 {
+get_reader_bits_remaining :: proc(bit_reader: Bit_Reader) -> u32 {
 	return bit_reader.num_bits - bit_reader.bits_read
 }
 
-get_reader_bytes_read :: proc(bit_reader: BitReader) -> u32 {
+get_reader_bytes_read :: proc(bit_reader: Bit_Reader) -> u32 {
 	return bit_reader.bits_read / 8
 }
 

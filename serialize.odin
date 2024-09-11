@@ -7,27 +7,27 @@ import "core:testing"
 
 EPSILON :: 1e-6
 
-CompressedInteger :: struct {
+Compressed_Integer :: struct {
 	value: i32,
 	min:   i32,
 	max:   i32,
 }
 
-CompressedFloat :: struct {
+Compressed_Float :: struct {
 	value:      f32,
 	min:        f32,
 	max:        f32,
 	resolution: f32,
 }
 
-CompressedVector2 :: struct {
+Compressed_Vector2 :: struct {
 	value:      Vector2,
 	min:        f32,
 	max:        f32,
 	resolution: f32,
 }
 
-CompressedVector3 :: struct {
+Compressed_Vector3 :: struct {
 	value:      Vector3,
 	min:        f32,
 	max:        f32,
@@ -60,7 +60,7 @@ bits_required :: proc(min, max: i32) -> int {
 
 @(require_results)
 serialize_integer :: proc(
-	bit_writer: ^BitWriter,
+	bit_writer: ^Bit_Writer,
 	value, min, max: i32,
 ) -> bool {
 	assert(min < max)
@@ -74,7 +74,7 @@ serialize_integer :: proc(
 
 @(require_results)
 deserialize_integer :: proc(
-	bit_reader: ^BitReader,
+	bit_reader: ^Bit_Reader,
 	min: i32,
 	max: i32,
 ) -> (
@@ -92,13 +92,13 @@ deserialize_integer :: proc(
 }
 
 @(require_results)
-serialize_float :: proc(bit_writer: ^BitWriter, value: f32) -> bool {
+serialize_float :: proc(bit_writer: ^Bit_Writer, value: f32) -> bool {
 	int_value := transmute(u32)value
 	return write_bits(bit_writer, int_value, 32)
 }
 
 @(require_results)
-deserialize_float :: proc(bit_reader: ^BitReader) -> (f32, bool) {
+deserialize_float :: proc(bit_reader: ^Bit_Reader) -> (f32, bool) {
 	int_value, success := read_bits(bit_reader, 32)
 	if !success {
 		return 0, false
@@ -109,7 +109,7 @@ deserialize_float :: proc(bit_reader: ^BitReader) -> (f32, bool) {
 // TODO(Thomas): Thorougly explain this. 
 @(require_results)
 serialize_compressed_float :: proc(
-	bit_writer: ^BitWriter,
+	bit_writer: ^Bit_Writer,
 	value: f32,
 	min: f32,
 	max: f32,
@@ -134,7 +134,7 @@ serialize_compressed_float :: proc(
 // TODO(Thomas): Thorougly explain this. 
 @(require_results)
 deserialize_compressed_float :: proc(
-	bit_reader: ^BitReader,
+	bit_reader: ^Bit_Reader,
 	min: f32,
 	max: f32,
 	resolution: f32,
@@ -165,7 +165,7 @@ Vector3 :: [3]f32
 Quaternion :: [4]f32
 
 @(require_results)
-serialize_vector2 :: proc(bit_writer: ^BitWriter, value: Vector2) -> bool {
+serialize_vector2 :: proc(bit_writer: ^Bit_Writer, value: Vector2) -> bool {
 	if !serialize_float(bit_writer, value[0]) {
 		return false
 	}
@@ -177,7 +177,7 @@ serialize_vector2 :: proc(bit_writer: ^BitWriter, value: Vector2) -> bool {
 }
 
 @(require_results)
-deserialize_vector2 :: proc(bit_reader: ^BitReader) -> (Vector2, bool) {
+deserialize_vector2 :: proc(bit_reader: ^Bit_Reader) -> (Vector2, bool) {
 	x, success1 := deserialize_float(bit_reader)
 	if !success1 {
 		return {}, false
@@ -193,7 +193,7 @@ deserialize_vector2 :: proc(bit_reader: ^BitReader) -> (Vector2, bool) {
 
 
 @(require_results)
-serialize_vector3 :: proc(bit_writer: ^BitWriter, value: Vector3) -> bool {
+serialize_vector3 :: proc(bit_writer: ^Bit_Writer, value: Vector3) -> bool {
 	if !serialize_float(bit_writer, value[0]) {
 		return false
 	}
@@ -208,7 +208,7 @@ serialize_vector3 :: proc(bit_writer: ^BitWriter, value: Vector3) -> bool {
 }
 
 @(require_results)
-deserialize_vector3 :: proc(bit_reader: ^BitReader) -> (Vector3, bool) {
+deserialize_vector3 :: proc(bit_reader: ^Bit_Reader) -> (Vector3, bool) {
 	x, success1 := deserialize_float(bit_reader)
 	if !success1 {
 		return {}, false
@@ -229,7 +229,7 @@ deserialize_vector3 :: proc(bit_reader: ^BitReader) -> (Vector3, bool) {
 
 @(require_results)
 serialize_compressed_vector2 :: proc(
-	bit_writer: ^BitWriter,
+	bit_writer: ^Bit_Writer,
 	vec2: Vector2,
 	min: f32,
 	max: f32,
@@ -247,7 +247,7 @@ serialize_compressed_vector2 :: proc(
 
 @(require_results)
 deserialize_compressed_vector2 :: proc(
-	bit_reader: ^BitReader,
+	bit_reader: ^Bit_Reader,
 	min: f32,
 	max: f32,
 	resolution: f32,
@@ -280,7 +280,7 @@ deserialize_compressed_vector2 :: proc(
 
 @(require_results)
 serialize_compressed_vector3 :: proc(
-	bit_writer: ^BitWriter,
+	bit_writer: ^Bit_Writer,
 	vec3: Vector3,
 	min: f32,
 	max: f32,
@@ -303,7 +303,7 @@ serialize_compressed_vector3 :: proc(
 
 @(require_results)
 deserialize_compressed_vector3 :: proc(
-	bit_reader: ^BitReader,
+	bit_reader: ^Bit_Reader,
 	min: f32,
 	max: f32,
 	resolution: f32,
@@ -346,7 +346,7 @@ deserialize_compressed_vector3 :: proc(
 
 @(require_results)
 serialize_quaternion :: proc(
-	bit_writer: ^BitWriter,
+	bit_writer: ^Bit_Writer,
 	quat: Quaternion,
 ) -> bool {
 	if !serialize_float(bit_writer, quat[0]) {
@@ -371,7 +371,7 @@ serialize_quaternion :: proc(
 // TODO(Thomas): Add serialize and deserialize procedures for compressed_quaternion
 
 @(require_results)
-deserialize_quaternion :: proc(bit_reader: ^BitReader) -> (Quaternion, bool) {
+deserialize_quaternion :: proc(bit_reader: ^Bit_Reader) -> (Quaternion, bool) {
 	x, success1 := deserialize_float(bit_reader)
 	if !success1 {
 		return Quaternion{}, false
@@ -396,17 +396,17 @@ deserialize_quaternion :: proc(bit_reader: ^BitReader) -> (Quaternion, bool) {
 }
 
 @(require_results)
-serialize_align :: proc(bit_writer: ^BitWriter) -> bool {
+serialize_align :: proc(bit_writer: ^Bit_Writer) -> bool {
 	return write_align(bit_writer)
 }
 
 @(require_results)
-deserialize_align :: proc(bit_reader: ^BitReader) -> bool {
+deserialize_align :: proc(bit_reader: ^Bit_Reader) -> bool {
 	return read_align(bit_reader)
 }
 
 @(require_results)
-serialize_bytes :: proc(bit_writer: ^BitWriter, data: []u8) -> bool {
+serialize_bytes :: proc(bit_writer: ^Bit_Writer, data: []u8) -> bool {
 	assert(len(data) > 0)
 	if !serialize_align(bit_writer) {
 		return false
@@ -416,7 +416,7 @@ serialize_bytes :: proc(bit_writer: ^BitWriter, data: []u8) -> bool {
 
 @(require_results)
 deserialize_bytes :: proc(
-	bit_reader: ^BitReader,
+	bit_reader: ^Bit_Reader,
 	data: []u8,
 	bytes: u32,
 ) -> bool {
