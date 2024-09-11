@@ -133,6 +133,7 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	// Write all the head bytes (bytes necessary to reach the next word (32 bits / 4 byte) boundary)
 	for i in 0 ..< head_bytes {
 		if !write_bits(writer, u32(data[i]), 8) {
+			// TODO(Thomas): Flipping this is not caught in any tests
 			return false
 		}
 	}
@@ -146,6 +147,7 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	}
 
 	if !flush_bits(writer) {
+		// TODO(Thomas): Fliiping this is not caught in tests
 		return false
 	}
 
@@ -287,10 +289,13 @@ read_align :: proc(reader: ^Bit_Reader) -> bool {
 
 @(require_results)
 read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
+	// NOTE: We assume that we're on byte alignment
 	assert(get_align_bits(reader.bits_read) == 0)
 	assert(reader.bits_read + bytes * 8 <= reader.num_bits)
 
 	head_bytes := calculate_head_bytes(reader.bits_read)
+	// If the number of bytes up to the next word boundary
+	// is larger we "clamp" it to the number of bytes.
 	if head_bytes > bytes {
 		head_bytes = bytes
 	}
@@ -298,16 +303,17 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	for i in 0 ..< head_bytes {
 		value, success := read_bits(reader, 8)
 		if !success {
+			// TODO(Thomas): Flipping this does not change outcome of unit tests
 			return false
 		}
 		// Safety: safe to cast to u8 since we only read 8 bits 
 		data[i] = u8(value)
 	}
 
-	// TODO(Thomas): Figure out what the actual purpose of this is
+	// NOTE: If head_bytes is equal to bytes, that means that there's no more
+	// to read after the head_bytes. This means that we're done and can just return.
 	if head_bytes == bytes {
-		//NOTE(Thomas): The original implementation just returns void here,
-		return false
+		return true
 	}
 
 	assert(get_align_bits(reader.bits_read) == 0)
@@ -1254,7 +1260,7 @@ test_read_bytes :: proc(t: ^testing.T) {
 		testing.expect_value(t, reader.bits_read, reader.num_bits)
 	}
 
-	// Test case 3: Read overlapping words that doest not align
+	// Test case 4: Read overlapping words that doest not align
 	{
 		buffer := []u32{0xDDCCBBAA, 0x99887766}
 		reader := create_reader(buffer)
@@ -1278,5 +1284,41 @@ test_read_bytes :: proc(t: ^testing.T) {
 
 		// Asserting reader state
 		testing.expect_value(t, reader.bits_read, 7 * 8)
+	}
+
+	// Test case 5: Read zero bytes
+	{
+		buffer := []u32{0x0000_0000}
+		reader := create_reader(buffer)
+
+		data: [4]u8
+		success := read_bytes(&reader, data[:], 0)
+		testing.expect(t, success, "Reading zero bytes should succeed")
+		testing.expect_value(t, data[0], 0)
+		testing.expect_value(t, data[1], 0)
+		testing.expect_value(t, data[2], 0)
+		testing.expect_value(t, data[3], 0)
+
+		testing.expect_value(t, reader.bits_read, 0)
+		testing.expect_value(t, reader.scratch, 0)
+		testing.expect_value(t, reader.scratch_bits, 0)
+	}
+
+	// Test case 6: Head bytes = bytes
+	{
+		buffer := []u32{0x0000_0000, 0x0000_0000}
+		reader := create_reader(buffer)
+
+		data: [4]u8
+		success := read_bytes(&reader, data[:], 1)
+		testing.expect(t, success, "Reading initial two bytes should succeed")
+		testing.expect_value(t, reader.bits_read, 8)
+
+		// Now we have set up a situation where head_bytes will be 2 inside of the reader on next read.
+		testing.expect_value(t, calculate_head_bytes(reader.bits_read), 3)
+
+		success_two := read_bytes(&reader, data[:], 2)
+		testing.expect(t, success_two, "Reading next two bytes should succeed")
+		testing.expect_value(t, reader.bits_read, 24)
 	}
 }
