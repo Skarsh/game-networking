@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:math"
 import "core:math/bits"
+import "core:mem"
 import "core:testing"
 
 EPSILON :: 1e-6
@@ -428,6 +429,7 @@ deserialize_bytes :: proc(
 	return read_bytes(bit_reader, data, bytes)
 }
 
+// Serailize string, the string 'str' cannot be larger than the buffer of the 'bit_writer' 
 @(require_results)
 serialize_string :: proc(bit_writer: ^Bit_Writer, str: string) -> bool {
 	str_bytes := transmute([]u8)str
@@ -446,8 +448,17 @@ serialize_string :: proc(bit_writer: ^Bit_Writer, str: string) -> bool {
 	return true
 }
 
+// Deserializes string from the 'bit_reader' and allocates the necessary backing memory for the string.  
+// This means that it's up to the user of this procedure to ensure that the
+// backing memory of the string is managed properly.
 @(require_results)
-deserialize_string :: proc(bit_reader: ^Bit_Reader) -> (string, bool) {
+deserialize_string :: proc(
+	bit_reader: ^Bit_Reader,
+	allocator := context.allocator,
+) -> (
+	string,
+	bool,
+) {
 	str_len, success := deserialize_integer(
 		bit_reader,
 		0,
@@ -457,8 +468,13 @@ deserialize_string :: proc(bit_reader: ^Bit_Reader) -> (string, bool) {
 		return "", false
 	}
 
-	str_bytes := make([]u8, str_len)
-	defer delete(str_bytes)
+	// NOTE(Thomas): We're allocating the bytes necessary for the string here.
+	// This makes sures the string still has valid memory to point to after the function returns.
+	// It's up to the caller of this function to make sure that the string is properly freed.
+	// This is why we're giving the option of passing in an allocator, so that the user calling
+	// this has more easily control over that. 
+	str_bytes := make_slice([]u8, str_len, allocator)
+
 
 	// Integer Safety: Should be safe to cast to u32 here due to
 	// the number of bytes should always be > 0. Lets assert to be sure.
@@ -903,8 +919,8 @@ test_serialize_deserialize_bytes :: proc(t: ^testing.T) {
 
 @(test)
 test_serialize_deserialize_string :: proc(t: ^testing.T) {
-	buffer := make([]u32, 100)
-	defer delete(buffer)
+	buffer := make([]u32, 100, context.temp_allocator)
+	defer free_all(context.temp_allocator)
 	writer := create_writer(buffer)
 	reader := create_reader(buffer)
 	str := "hello"
@@ -912,10 +928,41 @@ test_serialize_deserialize_string :: proc(t: ^testing.T) {
 	testing.expect(
 		t,
 		success,
-		"Should be able to serialize the string 'hello'",
+		fmt.tprintf("Should be able to serialize the string %s", str),
 	)
+	flush_success := flush_bits(&writer)
+	testing.expect(t, flush_success, "Flushing the bits should be successful")
 
-	des_str, str_success := deserialize_string(&reader)
-	testing.expect(t, str_success, "Should be able deserialize string 'hello'")
+	des_str, str_success := deserialize_string(&reader, context.temp_allocator)
+	testing.expect(
+		t,
+		str_success,
+		fmt.tprintf("Should be able deserialize string %s", str),
+	)
+	testing.expect_value(t, des_str, str)
+}
+
+@(test)
+test_serialize_deserialize_string_with_newline :: proc(t: ^testing.T) {
+	buffer := make([]u32, 100, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+	str := "hello\nworld"
+	success := serialize_string(&writer, str)
+	testing.expect(
+		t,
+		success,
+		fmt.tprint("Should be able to serialize the string '%s'", str),
+	)
+	flush_success := flush_bits(&writer)
+	testing.expect(t, flush_success, "Flushing the bits should be successful")
+
+	des_str, str_success := deserialize_string(&reader, context.temp_allocator)
+	testing.expect(
+		t,
+		str_success,
+		fmt.tprintf("Should be able deserialize string '%s'", str),
+	)
 	testing.expect_value(t, des_str, str)
 }
