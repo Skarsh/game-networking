@@ -116,7 +116,10 @@ serialize_compressed_float :: proc(
 	max: f32,
 	resolution: f32,
 ) -> bool {
-	assert(min < max)
+	assert(
+		min < max,
+		fmt.tprintf("assumed min %v is smaller than max %v", min, max),
+	)
 	assert(resolution != 0.0)
 
 	delta := max - min
