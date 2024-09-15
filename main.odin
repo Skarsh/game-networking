@@ -39,6 +39,7 @@ Test_Data :: union {
 	Byte_Buffer,
 	Compressed_Vector2,
 	Compressed_Vector3,
+	string,
 }
 
 random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> Test_Data {
@@ -71,6 +72,8 @@ random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> Test_Data {
 		return random_compressed_vector2(lo, hi, resolution)
 	case 5:
 		return random_compressed_vector3(lo, hi, resolution)
+	case 6:
+		return random_string(BYTE_BUFFER_SIZE)
 	case:
 		unreachable()
 	}
@@ -82,6 +85,12 @@ random_byte_buffer :: proc(size: u32) -> Byte_Buffer {
 		data[i] = u8(rand.int_max(256))
 	}
 	return Byte_Buffer{data}
+}
+
+random_string :: proc(size: u32) -> string {
+	str_bytes := random_byte_buffer(size)
+	str := transmute(string)str_bytes
+	return str
 }
 
 random_vector2 :: proc(lo: f32, hi: f32) -> Vector2 {
@@ -190,6 +199,8 @@ serialize_test_data :: proc(
 			data.max,
 			data.resolution,
 		)
+	case string:
+		return serialize_string(bit_writer, data)
 	case:
 		unreachable()
 	}
@@ -296,6 +307,22 @@ deserialize_test_data :: proc(
 		)
 		return Compressed_Vector3{value, data.min, data.max, data.resolution},
 			success
+	case string:
+		value, success := deserialize_string(
+			bit_reader,
+			context.temp_allocator,
+		)
+		log.debug("value: ", value)
+		assert(success, "Failed to serialize string")
+		assert(
+			value == data,
+			fmt.tprintf(
+				"Strings are not equal, expected %v, but got %v",
+				data,
+				value,
+			),
+		)
+		return value, success
 	case:
 		unreachable()
 	}
