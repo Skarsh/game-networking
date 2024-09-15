@@ -38,6 +38,7 @@ Test_Data :: union {
 	Quaternion,
 	Byte_Buffer,
 	Compressed_Vector2,
+	Compressed_Vector3,
 }
 
 random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> Test_Data {
@@ -68,6 +69,8 @@ random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> Test_Data {
 		return random_byte_buffer(BYTE_BUFFER_SIZE)
 	case 4:
 		return random_compressed_vector2(lo, hi, resolution)
+	case 5:
+		return random_compressed_vector3(lo, hi, resolution)
 	case:
 		unreachable()
 	}
@@ -121,6 +124,34 @@ random_compressed_vector2 :: proc(
 
 }
 
+random_compressed_vector3 :: proc(
+	lo: f32,
+	hi: f32,
+	resolution: f32,
+) -> Compressed_Vector3 {
+	val1 := rand.float32_range(lo, hi)
+	val2 := rand.float32_range(lo, hi)
+
+	min: f32
+	max: f32
+
+	// NOTE(Thomas): Subtracting 0.1 here to make sure
+	// that the case where val1 and val2 "equal", then the
+	// one that is deemed smaller is enforced to be smaller.
+	if val1 > val2 {
+		min = val2 - 0.1
+		max = val1
+	} else {
+		min = val1 - 0.1
+		max = val2
+	}
+
+	value := random_vector3(min, max)
+
+	return Compressed_Vector3{value, min, max, resolution}
+
+}
+
 random_quaternion :: proc(lo: f32, hi: f32) -> Quaternion {
 	return Quaternion {
 		rand.float32_range(lo, hi),
@@ -145,6 +176,14 @@ serialize_test_data :: proc(
 		return serialize_bytes(bit_writer, data.data)
 	case Compressed_Vector2:
 		return serialize_compressed_vector2(
+			bit_writer,
+			data.value,
+			data.min,
+			data.max,
+			data.resolution,
+		)
+	case Compressed_Vector3:
+		return serialize_compressed_vector3(
 			bit_writer,
 			data.value,
 			data.min,
@@ -235,6 +274,27 @@ deserialize_test_data :: proc(
 			),
 		)
 		return Compressed_Vector2{value, data.min, data.max, data.resolution},
+			success
+	case Compressed_Vector3:
+		value, success := deserialize_compressed_vector3(
+			bit_reader,
+			data.min,
+			data.max,
+			data.resolution,
+		)
+		assert(success, "Failed to deserialize compressed Vector3")
+		assert(
+			vec3_approx_equal(value, data.value, data.resolution),
+			fmt.tprintf(
+				"Compressed Vector3's are not equal, expected %v but got %v, with min: %v, max: %v, resolution: %v",
+				data.value,
+				value,
+				data.min,
+				data.max,
+				data.resolution,
+			),
+		)
+		return Compressed_Vector3{value, data.min, data.max, data.resolution},
 			success
 	case:
 		unreachable()
