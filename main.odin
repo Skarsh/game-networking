@@ -74,7 +74,7 @@ random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> Test_Data {
 }
 
 random_byte_buffer :: proc(size: u32) -> Byte_Buffer {
-	data := make([]u8, size)
+	data := make([]u8, size, context.temp_allocator)
 	for i in 0 ..< len(data) {
 		data[i] = u8(rand.int_max(256))
 	}
@@ -104,11 +104,14 @@ random_compressed_vector2 :: proc(
 	min: f32
 	max: f32
 
+	// NOTE(Thomas): Subtracting 0.1 here to make sure
+	// that the case where val1 and val2 "equal", then the
+	// one that is deemed smaller is enforced to be smaller.
 	if val1 > val2 {
-		min = val2
+		min = val2 - 0.1
 		max = val1
 	} else {
-		min = val1
+		min = val1 - 0.1
 		max = val2
 	}
 
@@ -199,7 +202,7 @@ deserialize_test_data :: proc(
 		return value, success
 	case Byte_Buffer:
 		byte_buffer := Byte_Buffer {
-			data = make([]u8, BYTE_BUFFER_SIZE),
+			data = make([]u8, BYTE_BUFFER_SIZE, context.temp_allocator),
 		}
 		success := deserialize_bytes(
 			bit_reader,
@@ -238,11 +241,14 @@ deserialize_test_data :: proc(
 	}
 }
 
-run_serialization_tests :: proc() {
+// Runs many serializaiton tests with random data, to try to trigger asserts.
+// Using temp_allocator here and freeing all to prevent running out of memory
+// when doing long continous tests.
+run_serialization_tests :: proc(allocator := context.temp_allocator) {
 	log.info("Serialization strategies integration tests started")
 
-	buffer := make([]u32, 1_000_000)
-	defer delete(buffer)
+	buffer := make([]u32, 1_000_000, context.temp_allocator)
+	defer free_all(allocator)
 
 	writer := create_writer(buffer)
 	reader := create_reader(buffer)
@@ -251,7 +257,7 @@ run_serialization_tests :: proc() {
 	hi: f32 = 1_000
 	resolution: f32 = 0.01
 
-	tests_data := make([]Test_Data, 100_000)
+	tests_data := make([]Test_Data, 100_000, context.temp_allocator)
 	for i in 0 ..< len(tests_data) {
 		log.debugf("Serializing test data for iteration: %v", i)
 		tests_data[i] = random_test_data_type(lo, hi, resolution)
@@ -285,11 +291,39 @@ run_serialization_tests :: proc() {
 }
 
 main :: proc() {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	context.allocator = mem.tracking_allocator(&track)
+
+	defer {
+		if len(track.allocation_map) > 0 {
+			fmt.eprintf(
+				"=== %v allocations not freed: ===\n",
+				len(track.allocation_map),
+			)
+			for _, entry in track.allocation_map {
+				fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+			}
+		}
+		if len(track.bad_free_array) > 0 {
+			fmt.eprintf(
+				"=== %v incorrect frees: ===\n",
+				len(track.bad_free_array),
+			)
+			for entry in track.bad_free_array {
+				fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+			}
+		}
+		mem.tracking_allocator_destroy(&track)
+	}
+
 	logger := log.create_console_logger(log.Level.Info)
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
-	run_serialization_tests()
+	for {
+		run_serialization_tests()
+	}
 
 	buffer := make([]u32, 100)
 	writer := create_writer(buffer)
