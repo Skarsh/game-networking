@@ -64,9 +64,12 @@ serialize_integer :: proc(
 	bit_writer: ^Bit_Writer,
 	value, min, max: i32,
 ) -> bool {
-	assert(min < max)
-	assert(value >= min)
-	assert(value <= max)
+	assert(
+		min < max,
+		fmt.tprintf("assumed min %v is smaller than max %v", min, max),
+	)
+	assert(value >= min, fmt.tprintf("assumed value %v >= min %v", value, min))
+	assert(value <= max, fmt.tprintf("assumed value %v <= max %v", value, max))
 	bits := bits_required(min, max)
 	unsigned_value := u32(value - min)
 	success := write_bits(bit_writer, unsigned_value, u32(bits))
@@ -107,7 +110,18 @@ deserialize_float :: proc(bit_reader: ^Bit_Reader) -> (f32, bool) {
 	return transmute(f32)int_value, true
 }
 
-// TODO(Thomas): Thorougly explain this. 
+// Serializes a compressed float value between min and max with the resolution given.
+// NOTE: Its important that the serialization and deserialization procedures uses the
+// same min, max and resolution values for this work properly.
+// NOTE: This will be numerically unstable at high values depending on the resolution.
+//
+// The idea behind how the compression works is that a floating point 
+// value with a resolution of 0.01 in the range of [0, 10] can represent
+// 1000 distinct values. Now we can represent the same amount of values in 
+// "integer space" by scaling up by a factor of the inverse of the resolution, meaning 1/0.01 = 1000
+// Then we can just serialize this as normal, meaning writing it as a u32 word and specifying the
+// number of bits to the Bit_Writer. This way for a value between 0,10, we went from having to use 32 bits
+// to represent it to 9 bits instead.
 @(require_results)
 serialize_compressed_float :: proc(
 	bit_writer: ^Bit_Writer,
@@ -120,7 +134,29 @@ serialize_compressed_float :: proc(
 		min < max,
 		fmt.tprintf("assumed min %v is smaller than max %v", min, max),
 	)
-	assert(resolution != 0.0)
+	assert(
+		resolution != 0.0,
+		fmt.tprintf("assumed resolution is not equal to 0.0"),
+	)
+	// Example 
+	// value = 15
+	// min = 10
+	// max = 20
+	// resolution = 0.01
+	// Then we'll get the following:
+	// delta = 20 - 10 = 10 
+	// values = 10 / 0.01 = 1000
+	// max_integer_value = ceil(1000) = 1000
+	// This means that 100 is the largest value we can
+	// represent with the current, min, max and resolution values
+	// required_bits = bits_required(0, 1000) = 9
+	// 
+	// normalized value = clamp((15 - 10 ) / 10, 0, 1)
+	// normalized_value = clamp(0.5, 0, 1) = 0.5, since 0 < 0.5 < 1
+	// integer_value = floor(0.5 * 1000 + 0.5) = 500
+	// We don't see it in this case, but the reason we're adding 0.5 here
+	// is to make sure we're in the "right" whole integer that we're then flooring down to.
+
 
 	delta := max - min
 	values := delta / resolution
@@ -135,7 +171,18 @@ serialize_compressed_float :: proc(
 	return write_bits(bit_writer, integer_value, u32(required_bits))
 }
 
-// TODO(Thomas): Thorougly explain this. 
+
+// Deserializes a compressed float value between min and max with the resolution given.
+// NOTE: Its important that the serialization and deserialization procedures uses the
+// same min, max and resolution values for this work properly.
+// NOTE: This will be numerically unstable at high values depending on the resolution.
+// The idea behind how the compression works is that a floating point 
+// value with a resolution of 0.01 in the range of [0, 10] can represent
+// 1000 distinct values. Now we can represent the same amount of values in 
+// "integer space" by scaling up by a factor of the inverse of the resolution, meaning 1/0.01 = 1000
+// Then we can just serialize this as normal, meaning writing it as a u32 word and specifying the
+// number of bits to the Bit_Writer. This way for a value between 0,10, we went from having to use 32 bits
+// to represent it to 9 bits instead.
 @(require_results)
 deserialize_compressed_float :: proc(
 	bit_reader: ^Bit_Reader,
@@ -146,8 +193,26 @@ deserialize_compressed_float :: proc(
 	f32,
 	bool,
 ) {
-	assert(min < max)
-	assert(resolution != 0.0)
+	assert(
+		min < max,
+		fmt.tprintf("assumed min %v is smaller than max %v", min, max),
+	)
+	assert(
+		resolution != 0.0,
+		fmt.tprintf("assumed resolution is not equal to 0.0"),
+	)
+
+	// Example - continuing from the serialization above
+	// min = 10
+	// max = 20
+	// resolution = 0.01
+	// delta = 20 - 10 = 10
+	// values = 10 / 0.01 = 1000
+	// max_integer_value = ceil(1000) = 1000
+	// required_bites = bits_required(1000) = 9
+	// integer_value = read_bits(bit_reader, 9) = 500 (We know that this is what the serialization function wrote)
+	// normalized_value := f32(500) / f32(1000) = 0.5
+	// value = 0.5 * 10 + 10 = 5 + 10 = 15
 
 	delta := max - min
 	values := delta / resolution
@@ -433,6 +498,8 @@ deserialize_bytes :: proc(
 }
 
 // Serailize string, the string 'str' cannot be larger than the buffer of the 'bit_writer' 
+// If serialization of the string length integer or the string bytes fails, this procedure
+// will return false.
 @(require_results)
 serialize_string :: proc(bit_writer: ^Bit_Writer, str: string) -> bool {
 	str_bytes := transmute([]u8)str
@@ -452,8 +519,7 @@ serialize_string :: proc(bit_writer: ^Bit_Writer, str: string) -> bool {
 }
 
 // Deserializes string from the 'bit_reader' and allocates the necessary backing memory for the string.  
-// This means that it's up to the user of this procedure to ensure that the
-// backing memory of the string is managed properly.
+// This means that it's up to the user of this procedure to ensure that the backing memory of the string is managed properly.
 @(require_results)
 deserialize_string :: proc(
 	bit_reader: ^Bit_Reader,
