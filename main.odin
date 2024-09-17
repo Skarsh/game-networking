@@ -67,13 +67,13 @@ random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> Test_Data {
 	case 2:
 		return random_quaternion(lo, hi)
 	case 3:
-		return random_byte_buffer(BYTE_BUFFER_SIZE)
+		return random_byte_buffer(u32(rand.float32_range(1, BYTE_BUFFER_SIZE)))
 	case 4:
 		return random_compressed_vector2(lo, hi, resolution)
 	case 5:
 		return random_compressed_vector3(lo, hi, resolution)
 	case 6:
-		return random_string(BYTE_BUFFER_SIZE)
+		return random_string(u32(rand.float32_range(1, BYTE_BUFFER_SIZE)))
 	case:
 		unreachable()
 	}
@@ -252,12 +252,12 @@ deserialize_test_data :: proc(
 		return value, success
 	case Byte_Buffer:
 		byte_buffer := Byte_Buffer {
-			data = make([]u8, BYTE_BUFFER_SIZE, context.temp_allocator),
+			data = make([]u8, len(data.data), context.temp_allocator),
 		}
 		success := deserialize_bytes(
 			bit_reader,
 			byte_buffer.data,
-			BYTE_BUFFER_SIZE,
+			u32(len(data.data)),
 		)
 		assert(success, "Failed to deserialize bytes")
 		assert(
