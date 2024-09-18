@@ -14,6 +14,7 @@ Byte_Buffer :: struct {
 	data: []u8,
 }
 
+
 compare_byte_buffers :: proc(
 	byte_buffer1: Byte_Buffer,
 	byte_buffer2: Byte_Buffer,
@@ -33,6 +34,8 @@ compare_byte_buffers :: proc(
 }
 
 Test_Data :: union {
+	i32,
+	f32,
 	Vector2,
 	Vector3,
 	Quaternion,
@@ -61,22 +64,34 @@ random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> Test_Data {
 	random := rand.int_max(variants_len)
 	switch random {
 	case 0:
-		return random_vector2(lo, hi)
+		return random_i32()
 	case 1:
-		return random_vector3(lo, hi)
+		return random_f32(lo, hi)
 	case 2:
-		return random_quaternion(lo, hi)
+		return random_vector2(lo, hi)
 	case 3:
-		return random_byte_buffer(u32(rand.float32_range(1, BYTE_BUFFER_SIZE)))
+		return random_vector3(lo, hi)
 	case 4:
-		return random_compressed_vector2(lo, hi, resolution)
+		return random_quaternion(lo, hi)
 	case 5:
-		return random_compressed_vector3(lo, hi, resolution)
+		return random_byte_buffer(u32(rand.float32_range(1, BYTE_BUFFER_SIZE)))
 	case 6:
+		return random_compressed_vector2(lo, hi, resolution)
+	case 7:
+		return random_compressed_vector3(lo, hi, resolution)
+	case 8:
 		return random_string(u32(rand.float32_range(1, BYTE_BUFFER_SIZE)))
 	case:
 		unreachable()
 	}
+}
+
+random_i32 :: proc() -> i32 {
+	return rand.int31_max(math.max(i32))
+}
+
+random_f32 :: proc(lo: f32, hi: f32) -> f32 {
+	return rand.float32_range(lo, hi)
 }
 
 random_byte_buffer :: proc(size: u32) -> Byte_Buffer {
@@ -175,6 +190,10 @@ serialize_test_data :: proc(
 	test_data: Test_Data,
 ) -> bool {
 	switch data in test_data {
+	case i32:
+		return serialize_integer(bit_writer, data, 0, math.max(i32))
+	case f32:
+		return serialize_float(bit_writer, data)
 	case Vector2:
 		return serialize_vector2(bit_writer, data)
 	case Vector3:
@@ -214,6 +233,30 @@ deserialize_test_data :: proc(
 	bool,
 ) {
 	switch data in test_data {
+	case i32:
+		value, success := deserialize_integer(bit_reader, 0, math.max(i32))
+		assert(success, "Failed to deserialize integer")
+		assert(
+			value == data,
+			fmt.tprintf(
+				"i32's are not equal, expected %v, but got %v",
+				data,
+				value,
+			),
+		)
+		return value, success
+	case f32:
+		value, success := deserialize_float(bit_reader)
+		assert(success, "Failed to deserialize integer")
+		assert(
+			value == data,
+			fmt.tprintf(
+				"f32's are not equal, expected %v, but got %v",
+				data,
+				value,
+			),
+		)
+		return value, success
 	case Vector2:
 		value, success := deserialize_vector2(bit_reader)
 		assert(success, "Failed to deserialize Vector2")
