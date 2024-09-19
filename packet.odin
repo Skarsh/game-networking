@@ -37,7 +37,7 @@ Entry :: struct {
 	received_fragments: u8,
 }
 
-SequenceBuffer :: struct {
+Sequence_Buffer :: struct {
 	sequence: [MAX_ENTRIES]u32,
 	entries:  [MAX_ENTRIES]Entry,
 }
