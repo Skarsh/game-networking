@@ -32,7 +32,12 @@ Fragment_Packet :: struct {
 
 MAX_ENTRIES :: 256
 
+// Used to represent empty entries since it cannot occur
+// by 16 bit sequence numbers.
+ENTRY_SENTINEL_VALUE :: 0xFFFF_FFFF
+
 Entry :: struct {
+	sequence:           u16,
 	num_fragments:      u8,
 	received_fragments: u8,
 }
@@ -40,6 +45,17 @@ Entry :: struct {
 Sequence_Buffer :: struct {
 	sequence: [MAX_ENTRIES]u32,
 	entries:  [MAX_ENTRIES]Entry,
+}
+
+get_sequence_index :: proc(sequence: u16) -> i32 {
+	return i32(sequence % MAX_ENTRIES)
+}
+
+receive_packet_fragments :: proc(
+	sequence_buffer: ^Sequence_Buffer,
+	fragment_packet: Fragment_Packet,
+) {
+
 }
 
 serialize_fragment_packet :: proc(
