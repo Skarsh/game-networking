@@ -7,6 +7,7 @@ import "core:math"
 import "core:math/rand"
 import "core:mem"
 import "core:mem/virtual"
+import "core:slice"
 
 BYTE_BUFFER_SIZE :: 100
 
@@ -40,6 +41,7 @@ Test_Data :: union {
 	Vector3,
 	Quaternion,
 	Byte_Buffer,
+	Compressed_Integer,
 	Compressed_Vector2,
 	Compressed_Vector3,
 	string,
@@ -76,10 +78,12 @@ random_test_data_type :: proc(lo: f32, hi: f32, resolution: f32) -> Test_Data {
 	case 5:
 		return random_byte_buffer(u32(rand.float32_range(1, BYTE_BUFFER_SIZE)))
 	case 6:
-		return random_compressed_vector2(lo, hi, resolution)
+		return random_compressed_integer()
 	case 7:
-		return random_compressed_vector3(lo, hi, resolution)
+		return random_compressed_vector2(lo, hi, resolution)
 	case 8:
+		return random_compressed_vector3(lo, hi, resolution)
+	case 9:
 		return random_string(u32(rand.float32_range(1, BYTE_BUFFER_SIZE)))
 	case:
 		unreachable()
@@ -118,6 +122,25 @@ random_vector3 :: proc(lo: f32, hi: f32) -> Vector3 {
 		rand.float32_range(lo, hi),
 		rand.float32_range(lo, hi),
 	}
+}
+
+random_compressed_integer :: proc() -> Compressed_Integer {
+	val1 := rand.int31()
+	val2 := rand.int31()
+	val3 := rand.int31()
+
+	vals: [3]i32
+	for i in 0 ..< len(vals) {
+		vals[i] = rand.int31()
+	}
+
+	slice.sort(vals[:])
+
+	min := vals[0]
+	value := vals[1]
+	max := vals[2]
+
+	return Compressed_Integer{value, min, max}
 }
 
 random_compressed_vector2 :: proc(
@@ -202,6 +225,8 @@ serialize_test_data :: proc(
 		return serialize_quaternion(bit_writer, data)
 	case Byte_Buffer:
 		return serialize_bytes(bit_writer, data.data)
+	case Compressed_Integer:
+		return serialize_integer(bit_writer, data.value, data.min, data.max)
 	case Compressed_Vector2:
 		return serialize_compressed_vector2(
 			bit_writer,
@@ -308,6 +333,19 @@ deserialize_test_data :: proc(
 			"Byte buffers are not equal",
 		)
 		return byte_buffer, success
+	case Compressed_Integer:
+		value, success := deserialize_integer(bit_reader, data.min, data.max)
+		compressed_integer := Compressed_Integer{value, data.min, data.max}
+		assert(success, "Failed to deserialize integer")
+		assert(
+			compressed_integer == data,
+			fmt.tprintf(
+				"Compressed_Integer's are not equal, expected %v, but got %v",
+				data,
+				compressed_integer,
+			),
+		)
+		return value, success
 	case Compressed_Vector2:
 		value, success := deserialize_compressed_vector2(
 			bit_reader,
