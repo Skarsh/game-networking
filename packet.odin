@@ -37,7 +37,6 @@ MAX_ENTRIES :: 256
 ENTRY_SENTINEL_VALUE :: 0xFFFF_FFFF
 
 Entry :: struct {
-	sequence:           u16,
 	num_fragments:      u8,
 	received_fragments: u8,
 }
@@ -47,13 +46,54 @@ Sequence_Buffer :: struct {
 	entries:  [MAX_ENTRIES]Entry,
 }
 
+// Since initially every entry in the Sequence_Buffer is empty, we set
+// all sequences to be the ENTRY_SENTINEL_VALUE
+init_sequence_buffer :: proc(sequence_buffer: ^Sequence_Buffer) {
+	for &sequence in sequence_buffer.sequence {
+		sequence = ENTRY_SENTINEL_VALUE
+	}
+}
+
 get_sequence_index :: proc(sequence: u16) -> i32 {
 	return i32(sequence % MAX_ENTRIES)
 }
 
+// TODO(Thomas): A lot of functionality missing, just sketching stuff out right now
 receive_packet_fragments :: proc(
 	sequence_buffer: ^Sequence_Buffer,
 	fragment_packet: Fragment_Packet,
+) {
+	index := get_sequence_index(fragment_packet.sequence)
+
+	if sequence_buffer.sequence[index] == ENTRY_SENTINEL_VALUE {
+		entry := Entry {
+			num_fragments      = fragment_packet.num_fragments,
+			received_fragments = 0,
+		}
+		sequence_buffer.entries[index] = entry
+	}
+}
+
+// TODO(Thomas) Pretty much everything
+advance_sequence :: proc(sequence_buffer: ^Sequence_Buffer) {
+
+}
+
+// TODO(Thomas) Everything
+process_fragment :: proc() {
+
+}
+
+// TODO(Thomas) Everything
+process_packet :: proc() {
+
+}
+
+split_packet_into_fragments :: proc(
+	sequence: u16,
+	packet_data: []u8,
+	num_fragments: u32,
+	fragments_packet_data: [][]u8,
 ) {
 
 }
