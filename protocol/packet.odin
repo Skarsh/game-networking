@@ -3,6 +3,9 @@ package protocol
 import "core:bytes"
 import "core:fmt"
 import "core:log"
+import "core:math"
+import "core:math/rand"
+import "core:mem"
 import "core:strings"
 import "core:testing"
 
@@ -17,6 +20,51 @@ MAX_PACKET_SIZE :: MAX_FRAGMENTS_PER_PACKET * MAX_FRAGMENT_SIZE
 Packet_Type :: enum {
 	Fragment,
 	TestPacket,
+}
+
+// Packet that should be larger than the MTU, so that we have to split it up into 
+// mutlple Fragment_Packet, but smaller than the MAX_PACKET_SIZE.
+TestPacket :: struct {
+	items: [2048]i32,
+}
+
+serialize_test_packet :: proc(
+	bit_writer: ^Bit_Writer,
+	test_packet: TestPacket,
+) -> bool {
+	for item in test_packet.items {
+		if !serialize_integer(bit_writer, item, 0, math.max(i32)) {
+			return false
+		}
+	}
+
+	return true
+}
+
+desserialize_test_packet :: proc(
+	bit_reader: ^Bit_Reader,
+) -> (
+	TestPacket,
+	bool,
+) {
+	test_packet := TestPacket{}
+	for i in 0 ..< len(test_packet.items) {
+		item, ok := deserialize_integer(bit_reader, 0, math.max(i32))
+		if !ok {
+			return TestPacket{}, false
+		}
+		test_packet.items[i] = item
+	}
+
+	return test_packet, true
+}
+
+random_test_packet :: proc() -> TestPacket {
+	test_packet := TestPacket{}
+	for i in 0 ..< len(test_packet.items) {
+		test_packet.items[i] = rand.int31()
+	}
+	return test_packet
 }
 
 Fragment_Packet :: struct {
@@ -42,8 +90,9 @@ Entry :: struct {
 }
 
 Sequence_Buffer :: struct {
-	sequence: [MAX_ENTRIES]u32,
-	entries:  [MAX_ENTRIES]Entry,
+	current_sequence: u32,
+	sequence:         [MAX_ENTRIES]u32,
+	entries:          [MAX_ENTRIES]Entry,
 }
 
 // Since initially every entry in the Sequence_Buffer is empty, we set
@@ -56,6 +105,11 @@ init_sequence_buffer :: proc(sequence_buffer: ^Sequence_Buffer) {
 
 get_sequence_index :: proc(sequence: u16) -> i32 {
 	return i32(sequence % MAX_ENTRIES)
+}
+
+// TODO(Thomas): A lot of functionality is missing, just sketching stuff out right now
+advance_sequence :: proc(sequence_buffer: ^Sequence_Buffer) {
+	sequence_buffer.current_sequence += 1
 }
 
 // TODO(Thomas): A lot of functionality missing, just sketching stuff out right now
@@ -74,11 +128,6 @@ receive_packet_fragments :: proc(
 	}
 }
 
-// TODO(Thomas) Pretty much everything
-advance_sequence :: proc(sequence_buffer: ^Sequence_Buffer) {
-
-}
-
 // TODO(Thomas) Everything
 process_fragment :: proc() {
 
@@ -92,10 +141,32 @@ process_packet :: proc() {
 split_packet_into_fragments :: proc(
 	sequence: u16,
 	packet_data: []u8,
-	num_fragments: u32,
-	fragments_packet_data: [][]u8,
-) {
+	num_fragments: ^u32,
+	allocator := context.temp_allocator,
+) -> []Fragment_Packet {
 
+	num_fragments^ = 0
+
+	packet_size := u32(len(packet_data))
+	assert(packet_size > 0)
+	assert(packet_size < MAX_PACKET_SIZE)
+
+	// Add one if MAX_FRAGMENT_SIZE does not evenly divide the packet size,
+	// this is integer division we'll essentially get the floor value.
+	// So we need one more fragment for the rest.
+	num_fragments^ =
+		packet_size / MAX_FRAGMENT_SIZE +
+		((packet_size % MAX_FRAGMENT_SIZE == 0) ? 0 : 1)
+
+
+	fragments := make([]Fragment_Packet, num_fragments^, allocator)
+
+	for i in 0 ..< num_fragments^ {
+		fragment_packet := Fragment_Packet{}
+		fragments[i] = fragment_packet
+	}
+
+	return fragments
 }
 
 serialize_fragment_packet :: proc(
@@ -103,45 +174,38 @@ serialize_fragment_packet :: proc(
 	fragment_packet: Fragment_Packet,
 ) -> bool {
 
-	ok := write_bits(bit_writer, fragment_packet.fragment_size, 32)
-	if !ok {
+	if !write_bits(bit_writer, fragment_packet.fragment_size, 32) {
 		return false
 	}
 
-	ok = write_bits(bit_writer, fragment_packet.crc32, 32)
-	if !ok {
+	if !write_bits(bit_writer, fragment_packet.crc32, 32) {
 		return false
 	}
 
-	ok = write_bits(bit_writer, u32(fragment_packet.sequence), 32)
-	if !ok {
+	if !write_bits(bit_writer, u32(fragment_packet.sequence), 32) {
 		return false
 	}
 
 	// NOTE(Thomas): This len(Packet_Type) - 1 trick only works if 
 	// there is more than one variant in the Packet_Type enum
-	ok = write_bits(
+	if !write_bits(
 		bit_writer,
 		u32(fragment_packet.packet_type),
 		len(Packet_Type) - 1,
-	)
-	if !ok {
+	) {
 		return false
 	}
 
-	ok = write_bits(bit_writer, u32(fragment_packet.fragment_id), 8)
-	if !ok {
+	if !write_bits(bit_writer, u32(fragment_packet.fragment_id), 8) {
 		return false
 	}
 
-	ok = write_bits(bit_writer, u32(fragment_packet.num_fragments), 8)
-	if !ok {
+	if !write_bits(bit_writer, u32(fragment_packet.num_fragments), 8) {
 		return false
 	}
 
 	// Ensure alignment to byte index, so we can simply calculate the fragment size
-	ok = serialize_align(bit_writer)
-	if !ok {
+	if !serialize_align(bit_writer) {
 		return false
 	}
 
@@ -150,8 +214,7 @@ serialize_fragment_packet :: proc(
 
 	assert(len(fragment_packet.data) <= int(fragment_packet.fragment_size))
 
-	ok = serialize_bytes(bit_writer, fragment_packet.data[:])
-	if !ok {
+	if !serialize_bytes(bit_writer, fragment_packet.data[:]) {
 		return false
 	}
 
@@ -408,4 +471,74 @@ test_init_sequence_buffer :: proc(t: ^testing.T) {
 	for seq in seq_buffer.sequence {
 		testing.expect_value(t, seq, ENTRY_SENTINEL_VALUE)
 	}
+}
+
+@(test)
+test_serialize_deserialize_test_packet :: proc(t: ^testing.T) {
+	buffer := make([]u32, 2048)
+	defer delete(buffer)
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+
+	test_packet := random_test_packet()
+	serialize_ok := serialize_test_packet(&writer, test_packet)
+
+	testing.expectf(
+		t,
+		serialize_ok,
+		fmt.tprintf("Serializing test packet should be successful"),
+	)
+
+	deserialized_test_packet, deserialize_ok := desserialize_test_packet(
+		&reader,
+	)
+	testing.expectf(
+		t,
+		deserialize_ok,
+		fmt.tprintf("Deserializing test packet should be successful"),
+	)
+
+	testing.expect_value(t, deserialized_test_packet, test_packet)
+}
+
+@(test)
+test_split_packet_into_fragments_exact :: proc(t: ^testing.T) {
+
+	packet_size := 2048
+	packet_data := make([]u8, packet_size, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+
+	num_fragments: u32 = 0
+
+	fragments := split_packet_into_fragments(
+		0,
+		packet_data,
+		&num_fragments,
+		context.temp_allocator,
+	)
+
+	testing.expect_value(t, len(fragments), packet_size / MAX_FRAGMENT_SIZE)
+}
+
+@(test)
+test_split_packet_into_fragments_one_rest :: proc(t: ^testing.T) {
+
+	packet_size := 2049
+	packet_data := make([]u8, packet_size, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+
+	num_fragments: u32 = 0
+
+	fragments := split_packet_into_fragments(
+		0,
+		packet_data,
+		&num_fragments,
+		context.temp_allocator,
+	)
+
+	testing.expect_value(
+		t,
+		len(fragments),
+		(packet_size / MAX_FRAGMENT_SIZE) + 1,
+	)
 }

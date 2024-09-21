@@ -196,6 +196,25 @@ get_align_bits :: proc(bits: u32) -> u32 {
 	return (8 - (bits % 8)) % 8
 }
 
+// TODO(Thomas): Does this belong in a util.odin or similar??
+// Converts a slice of words(u32) to a slice of bytes. This does not allocate.
+convert_word_slice_to_byte_slice :: proc(buffer: []u32) -> []u8 {
+
+	bytes := transmute([]u8)mem.slice_ptr(
+		raw_data(buffer),
+		len(buffer) * size_of(u32),
+	)
+
+	return bytes
+}
+
+// TODO(Thomas): Does this belong in a util.odin or similar??
+// Converts a slice of bytes to a slice of words(u32). This does not allocate.
+convert_byte_slice_to_word_slice :: proc(buffer: []u8) -> []u32 {
+	words := transmute([]u32)mem.slice_ptr(raw_data(buffer), len(buffer))
+	return words
+}
+
 // TODO(Thomas): There are certain things that are related between
 // the Bit_Writer and the Bit_Reader. One example is that the size
 // of the buffer probably should be in sync, since certain de-/serailize
@@ -210,10 +229,12 @@ Bit_Reader :: struct {
 	word_index:   u32,
 }
 
+// Get the remaining number of bits until the total number / capacity of the Bit_Writer has been reached.
 get_writer_bits_remaining :: proc(bit_writer: Bit_Writer) -> u32 {
 	return bit_writer.num_bits - bit_writer.bits_written
 }
 
+// TODO(Thomas): Is this totally correct? Does this have a integer division error?
 get_writer_bytes_written :: proc(bit_writer: Bit_Writer) -> u32 {
 	return bit_writer.bits_written / 8
 }

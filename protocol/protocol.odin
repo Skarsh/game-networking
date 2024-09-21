@@ -4,6 +4,11 @@ import "core:hash"
 import "core:math"
 import "core:testing"
 
+PROTOCOL_ID :: 0x55667788
+
+// Maximum Transmission Unit(MTU) in bytes
+MTU :: 1200
+
 // Checks if a sequence number is greater than the other.
 // Involves a trick where it checks that the sequence numbers
 // are within half the range of a u16 (2^16 / 2 = 32768) of each other.
