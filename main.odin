@@ -88,5 +88,10 @@ main :: proc() {
 			context.allocator,
 		)
 		defer delete(fragments_data)
+
+		// TODO(Thomas): The continuation here is now to serialize all the fragments
+		// Then deserialize them and recreate the original TestPacket.
+		// Also think about the Bit_Writer here, should it be two different ones for the TestPacket
+		// and the fragments? If not, its needs to be reset before writing the fragments no?
 	}
 }
