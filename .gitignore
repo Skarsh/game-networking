@@ -1,11 +1,16 @@
 
-*.exe
+# Misc files
 *.so
-*.pdb
 *.rdbg
 
-# Exe file on linux
-udp
+# Compilation and testing artifacts
+*.pdb
+*.bin
+*.exe
 
+# Name of executable file on Linux
+udp 
+
+# Directories
 .vscode/
 
