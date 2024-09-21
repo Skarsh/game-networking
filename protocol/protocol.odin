@@ -1,4 +1,4 @@
-package main
+package protocol
 
 import "core:hash"
 import "core:math"

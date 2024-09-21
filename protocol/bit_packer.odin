@@ -1,4 +1,4 @@
-package main
+package protocol
 
 import "core:fmt"
 import "core:mem"

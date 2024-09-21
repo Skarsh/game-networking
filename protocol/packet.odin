@@ -1,4 +1,4 @@
-package main
+package protocol
 
 import "core:bytes"
 import "core:fmt"
@@ -394,4 +394,18 @@ test_serialize_deserialize_fragment_packet_medium_size :: proc(t: ^testing.T) {
 		compare_fragment_packet(fragment_packet, deserialized_fragment_packet),
 		"expected fragment_packet and deserialized_fragment_packet to be qual, but they were not",
 	)
+}
+
+@(test)
+test_init_sequence_buffer :: proc(t: ^testing.T) {
+	seq_buffer := Sequence_Buffer{}
+	for seq in seq_buffer.sequence {
+		testing.expect_value(t, seq, 0)
+	}
+
+	init_sequence_buffer(&seq_buffer)
+
+	for seq in seq_buffer.sequence {
+		testing.expect_value(t, seq, ENTRY_SENTINEL_VALUE)
+	}
 }
