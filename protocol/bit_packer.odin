@@ -196,6 +196,7 @@ get_align_bits :: proc(bits: u32) -> u32 {
 	return (8 - (bits % 8)) % 8
 }
 
+// TODO(Thomas): Unit testing
 // TODO(Thomas): Does this belong in a util.odin or similar??
 // Converts a slice of words(u32) to a slice of bytes. This does not allocate.
 convert_word_slice_to_byte_slice :: proc(buffer: []u32) -> []u8 {
@@ -208,6 +209,7 @@ convert_word_slice_to_byte_slice :: proc(buffer: []u32) -> []u8 {
 	return bytes
 }
 
+// TODO(Thomas): Unit testing
 // TODO(Thomas): Does this belong in a util.odin or similar??
 // Converts a slice of bytes to a slice of words(u32). This does not allocate.
 convert_byte_slice_to_word_slice :: proc(buffer: []u8) -> []u32 {

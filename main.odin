@@ -54,12 +54,14 @@ main :: proc() {
 	// Utilize the sequence buffer here
 	// Finally reconstruct the original packet from the fragment packets.
 
-	// Next step is to do this for multiple large packets.
-	// Step after that is to do it over the network
-
+	// NOTE(Thomas): It makes more sense to use the context.temp_allocator or some Scratch / Arena
+	// allocator, but it's nice to use the context.allocator here now for tracking purposes.
 	buffer := make([]u32, 2048, context.allocator)
 	defer delete(buffer)
 	writer := create_writer(buffer)
+
+	fragments_buffer := make([]u32, 10_000, context.allocator)
+	defer delete(fragments_buffer)
 
 	// Sending
 	test_packet := proto.random_test_packet()
@@ -81,17 +83,23 @@ main :: proc() {
 		assert(test_packet == packet)
 
 		num_fragments: u32 = 0
-		fragments_data := split_packet_into_fragments(
+		fragments := split_packet_into_fragments(
 			0,
 			packet_data,
-			&num_fragments,
 			context.allocator,
 		)
-		defer delete(fragments_data)
+		defer delete(fragments)
 
-		// TODO(Thomas): The continuation here is now to serialize all the fragments
-		// Then deserialize them and recreate the original TestPacket.
-		// Also think about the Bit_Writer here, should it be two different ones for the TestPacket
-		// and the fragments? If not, its needs to be reset before writing the fragments no?
+		fragments_writer := create_writer(fragments_buffer)
+		for fragment in fragments {
+			assert(serialize_fragment_packet(&fragments_writer, fragment))
+			assert(flush_bits(&fragments_writer))
+		}
+
+
+		// free fragment data
+		for fragment in fragments {
+			delete(fragment.data)
+		}
 	}
 }

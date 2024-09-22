@@ -138,32 +138,53 @@ process_packet :: proc() {
 
 }
 
+// TODO(Thomas): Better suited default allocator?
 split_packet_into_fragments :: proc(
 	sequence: u16,
 	packet_data: []u8,
-	num_fragments: ^u32,
 	allocator := context.temp_allocator,
 ) -> []Fragment_Packet {
 
-	num_fragments^ = 0
+	num_fragments := 0
 
 	packet_size := u32(len(packet_data))
 	assert(packet_size > 0)
 	assert(packet_size < MAX_PACKET_SIZE)
 
-	// Add one if MAX_FRAGMENT_SIZE does not evenly divide the packet size,
-	// this is integer division we'll essentially get the floor value.
-	// So we need one more fragment for the rest.
-	num_fragments^ =
-		packet_size / MAX_FRAGMENT_SIZE +
-		((packet_size % MAX_FRAGMENT_SIZE == 0) ? 0 : 1)
+	remainder := packet_size % MAX_FRAGMENT_SIZE
 
+	if remainder == 0 {
+		num_fragments = int(packet_size) / MAX_FRAGMENT_SIZE
+	} else {
+		num_fragments = (int(packet_size) / MAX_FRAGMENT_SIZE) + 1
+	}
 
-	fragments := make([]Fragment_Packet, num_fragments^, allocator)
+	fragments := make([]Fragment_Packet, num_fragments, allocator)
 
-	for i in 0 ..< num_fragments^ {
-		fragment_packet := Fragment_Packet{}
-		fragments[i] = fragment_packet
+	for &fragment, i in fragments {
+
+		fragment_size := MAX_FRAGMENT_SIZE
+
+		// The case where packet_size / MAX_FRAGMENT_SIZE does not divide evenly, we get a
+		// remainder which will be the size of the last packet.
+		if remainder != 0 && i == int(num_fragments) - 1 {
+			fragment_size = int(remainder)
+		}
+
+		fragment.data = make([]u8, MAX_FRAGMENT_SIZE, allocator)
+
+		mem.copy(
+			&fragment.data[0],
+			&packet_data[i * fragment_size],
+			fragment_size,
+		)
+
+		fragment.fragment_size = u32(fragment_size)
+		fragment.crc32 = calculate_crc32(fragment.data)
+		fragment.sequence = sequence
+		fragment.packet_type = Packet_Type.Fragment
+		fragment.fragment_id = u8(i)
+		fragment.num_fragments = u8(num_fragments)
 	}
 
 	return fragments
@@ -508,31 +529,28 @@ test_split_packet_into_fragments_exact :: proc(t: ^testing.T) {
 	packet_data := make([]u8, packet_size, context.temp_allocator)
 	defer free_all(context.temp_allocator)
 
-	num_fragments: u32 = 0
-
 	fragments := split_packet_into_fragments(
 		0,
 		packet_data,
-		&num_fragments,
 		context.temp_allocator,
 	)
 
 	testing.expect_value(t, len(fragments), packet_size / MAX_FRAGMENT_SIZE)
+	for fragment in fragments {
+		testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+	}
 }
 
 @(test)
-test_split_packet_into_fragments_one_rest :: proc(t: ^testing.T) {
+test_split_packet_into_fragments_one_remainder :: proc(t: ^testing.T) {
 
 	packet_size := 2049
 	packet_data := make([]u8, packet_size, context.temp_allocator)
 	defer free_all(context.temp_allocator)
 
-	num_fragments: u32 = 0
-
 	fragments := split_packet_into_fragments(
 		0,
 		packet_data,
-		&num_fragments,
 		context.temp_allocator,
 	)
 
@@ -541,4 +559,12 @@ test_split_packet_into_fragments_one_rest :: proc(t: ^testing.T) {
 		len(fragments),
 		(packet_size / MAX_FRAGMENT_SIZE) + 1,
 	)
+
+	for fragment, i in fragments {
+		if i == len(fragments) - 1 {
+			testing.expect_value(t, fragment.fragment_size, 1)
+		} else {
+			testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+		}
+	}
 }
