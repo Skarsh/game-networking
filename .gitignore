@@ -2,6 +2,7 @@
 # Misc files
 *.so
 *.rdbg
+*.o
 
 # Compilation and testing artifacts
 *.pdb
