@@ -255,13 +255,7 @@ create_reader :: proc(buffer: []u32) -> Bit_Reader {
 
 
 @(require_results)
-read_bits :: proc(
-	reader: ^Bit_Reader,
-	bits: u32,
-) -> (
-	value: u32,
-	success: bool,
-) {
+read_bits :: proc(reader: ^Bit_Reader, bits: u32) -> (u32, bool) {
 	if bits == 0 {
 		return 0, true
 	}
@@ -289,7 +283,7 @@ read_bits :: proc(
 
 	// Read the bits
 	mask := u64((1 << bits) - 1)
-	value = u32(reader.scratch & mask)
+	value := u32(reader.scratch & mask)
 
 	// Update the scratch
 	reader.scratch >>= bits
