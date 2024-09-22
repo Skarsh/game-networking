@@ -4,7 +4,7 @@ import "core:hash"
 import "core:math"
 import "core:testing"
 
-PROTOCOL_ID :: 0x55667788
+PROTOCOL_ID: u32 : 0x55667788
 
 // Maximum Transmission Unit(MTU) in bytes
 MTU :: 1200

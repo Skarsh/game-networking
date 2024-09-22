@@ -133,9 +133,21 @@ process_fragment :: proc() {
 
 }
 
-// TODO(Thomas) Everything
-process_packet :: proc() {
+// TODO(Thomas) Continue implementing this
+process_packet :: proc(data: []u8) -> bool {
+	words := convert_byte_slice_to_word_slice(data)
+	reader := create_reader(words)
 
+	protocol_id := PROTOCOL_ID
+	protocol_id_bytes := transmute([4]u8)protocol_id
+	crc32 := calculate_crc32(protocol_id_bytes[:])
+
+	fragment_packet, ok := deserialize_fragment_packet(&reader)
+	if !ok {
+		return false
+	}
+
+	return true
 }
 
 // TODO(Thomas): Better suited default allocator?
@@ -237,6 +249,20 @@ serialize_fragment_packet :: proc(
 
 	if !serialize_bytes(bit_writer, fragment_packet.data[:]) {
 		return false
+	}
+
+	return true
+}
+
+// TODO(Thomas): Add unit tests
+serialize_fragment_packets :: proc(
+	bit_writer: ^Bit_Writer,
+	fragment_packets: []Fragment_Packet,
+) -> bool {
+	for fragment in fragment_packets {
+		if !serialize_fragment_packet(bit_writer, fragment) {
+			return false
+		}
 	}
 
 	return true

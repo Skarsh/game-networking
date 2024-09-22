@@ -91,10 +91,8 @@ main :: proc() {
 		defer delete(fragments)
 
 		fragments_writer := create_writer(fragments_buffer)
-		for fragment in fragments {
-			assert(serialize_fragment_packet(&fragments_writer, fragment))
-			assert(flush_bits(&fragments_writer))
-		}
+		assert(serialize_fragment_packets(&fragments_writer, fragments))
+		assert(flush_bits(&fragments_writer))
 
 
 		// free fragment data
@@ -102,4 +100,6 @@ main :: proc() {
 			delete(fragment.data)
 		}
 	}
+
+	// Receiving
 }
