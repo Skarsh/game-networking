@@ -39,8 +39,9 @@ main :: proc() {
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
-	sequence_buffer := Sequence_Buffer{}
-	init_sequence_buffer(&sequence_buffer)
+	sequence_buffer := new(Sequence_Buffer, context.allocator)
+	defer free(sequence_buffer)
+	init_sequence_buffer(sequence_buffer)
 
 	// Simple red thread test for packet fragmentation and reassembly, no network related stuff yet.
 	// 
@@ -82,7 +83,6 @@ main :: proc() {
 		assert(des_ok)
 		assert(test_packet == packet)
 
-		num_fragments: u32 = 0
 		fragments := split_packet_into_fragments(
 			0,
 			packet_data,

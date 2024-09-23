@@ -87,6 +87,7 @@ ENTRY_SENTINEL_VALUE :: 0xFFFF_FFFF
 Entry :: struct {
 	num_fragments:      u8,
 	received_fragments: u8,
+	fragments:          [MAX_FRAGMENTS_PER_PACKET][]u8,
 }
 
 Sequence_Buffer :: struct {
@@ -117,6 +118,24 @@ receive_packet_fragments :: proc(
 	sequence_buffer: ^Sequence_Buffer,
 	fragment_packet: Fragment_Packet,
 ) {
+	// TODO(Thomas): All this probably belongs in the process_fragment procedure
+	//index := get_sequence_index(fragment_packet.sequence)
+
+	//if sequence_buffer.sequence[index] == ENTRY_SENTINEL_VALUE {
+	//	entry := Entry {
+	//		num_fragments      = fragment_packet.num_fragments,
+	//		received_fragments = 0,
+	//	}
+	//	sequence_buffer.entries[index] = entry
+	//}
+}
+
+// TODO(Thomas) Everything
+process_fragment :: proc(
+	sequence_buffer: ^Sequence_Buffer,
+	fragment_packet: Fragment_Packet,
+) -> bool {
+
 	index := get_sequence_index(fragment_packet.sequence)
 
 	if sequence_buffer.sequence[index] == ENTRY_SENTINEL_VALUE {
@@ -124,28 +143,54 @@ receive_packet_fragments :: proc(
 			num_fragments      = fragment_packet.num_fragments,
 			received_fragments = 0,
 		}
+		entry.fragments[fragment_packet.fragment_id] = fragment_packet.data
 		sequence_buffer.entries[index] = entry
+
+		// TODO(Thomas): Is this correct??
+		sequence_buffer.sequence[index] = u32(fragment_packet.sequence)
+		sequence_buffer.current_sequence = u32(fragment_packet.sequence)
+	} else {
+		sequence_buffer.entries[index].received_fragments += 1
+
+		sequence_buffer.entries[index].num_fragments =
+			fragment_packet.num_fragments
+
+		sequence_buffer.entries[index].fragments[fragment_packet.fragment_id] =
+			fragment_packet.data
+
+		// TODO(Thomas): Is this correct??
+		sequence_buffer.sequence[index] = u32(fragment_packet.sequence)
+		sequence_buffer.current_sequence = u32(fragment_packet.sequence)
 	}
+
+	return true
 }
 
-// TODO(Thomas) Everything
-process_fragment :: proc() {
-
-}
-
-// TODO(Thomas) Continue implementing this
-process_packet :: proc(data: []u8) -> bool {
+// Idea here is that we get the raw packet data
+process_packet :: proc(sequence_buffer: ^Sequence_Buffer, data: []u8) -> bool {
 	words := convert_byte_slice_to_word_slice(data)
 	reader := create_reader(words)
-
-	protocol_id := PROTOCOL_ID
-	protocol_id_bytes := transmute([4]u8)protocol_id
-	crc32 := calculate_crc32(protocol_id_bytes[:])
 
 	fragment_packet, ok := deserialize_fragment_packet(&reader)
 	if !ok {
 		return false
 	}
+
+	protocol_id := PROTOCOL_ID
+	protocol_id_bytes := transmute([4]u8)protocol_id
+	crc32 := calculate_crc32(protocol_id_bytes[:])
+
+	// TODO(Thomas): Deal with crc32 calculation properly and compare the 
+	// Packet crc32 to the one we've calculated here
+
+	if fragment_packet.packet_type == Packet_Type.Fragment {
+		if !process_fragment(sequence_buffer, fragment_packet) {
+			return false
+		}
+	} else {
+		// TODO(Thomas): What to do here??
+	}
+
 
 	return true
 }
@@ -508,12 +553,14 @@ test_serialize_deserialize_fragment_packet_medium_size :: proc(t: ^testing.T) {
 
 @(test)
 test_init_sequence_buffer :: proc(t: ^testing.T) {
-	seq_buffer := Sequence_Buffer{}
+	seq_buffer, err := new(Sequence_Buffer)
+	assert(err == nil)
+	defer free(seq_buffer)
 	for seq in seq_buffer.sequence {
 		testing.expect_value(t, seq, 0)
 	}
 
-	init_sequence_buffer(&seq_buffer)
+	init_sequence_buffer(seq_buffer)
 
 	for seq in seq_buffer.sequence {
 		testing.expect_value(t, seq, ENTRY_SENTINEL_VALUE)
@@ -591,6 +638,75 @@ test_split_packet_into_fragments_one_remainder :: proc(t: ^testing.T) {
 			testing.expect_value(t, fragment.fragment_size, 1)
 		} else {
 			testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+		}
+	}
+}
+
+@(test)
+test_process_packet :: proc(t: ^testing.T) {
+	sequence_buffer := new(Sequence_Buffer)
+	init_sequence_buffer(sequence_buffer)
+	defer free(sequence_buffer)
+
+	buffer := make([]u32, 2048)
+	defer delete(buffer)
+	writer := create_writer(buffer)
+
+	fragments_buffer := make([]u32, 10_000)
+	defer delete(fragments_buffer)
+
+	test_packet := TestPacket{}
+
+	if size_of(test_packet) > MTU {
+		testing.expectf(
+			t,
+			serialize_test_packet(&writer, test_packet),
+			"serializing test packet should be successful",
+		)
+		testing.expect(
+			t,
+			flush_bits(&writer),
+			"flushing test packet writer should be successful",
+		)
+
+		packet_data := convert_word_slice_to_byte_slice(writer.buffer)
+		testing.expect_value(t, len(packet_data), 2048 * size_of(u32))
+
+		fragments := split_packet_into_fragments(
+			0,
+			packet_data,
+			context.allocator,
+		)
+		defer delete(fragments)
+
+		fragments_writer := create_writer(fragments_buffer)
+		testing.expectf(
+			t,
+			serialize_fragment_packets(&fragments_writer, fragments),
+			"serializing fragment packets should be successful",
+		)
+		testing.expectf(
+			t,
+			flush_bits(&fragments_writer),
+			"flushing fragment packets writer should be successful",
+		)
+
+		// TODO(Thomas): Continue here, we're passing all of the fragments data here
+		// but a process_packet should really only process one Fragment_Packet, so it
+		// should only take the serialized data for that packet.
+
+		fragments_data := convert_word_slice_to_byte_slice(
+			fragments_writer.buffer,
+		)
+		testing.expectf(
+			t,
+			process_packet(sequence_buffer, fragments_data),
+			"process packet should be successful",
+		)
+
+		// free fragment data
+		for fragment in fragments {
+			delete(fragment.data)
 		}
 	}
 }
