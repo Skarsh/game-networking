@@ -1,6 +1,8 @@
 package protocol
 
 import "core:fmt"
+import "core:math"
+import "core:math/rand"
 import "core:mem"
 import "core:testing"
 
@@ -196,11 +198,9 @@ get_align_bits :: proc(bits: u32) -> u32 {
 	return (8 - (bits % 8)) % 8
 }
 
-// TODO(Thomas): Unit testing
 // TODO(Thomas): Does this belong in a util.odin or similar??
 // Converts a slice of words(u32) to a slice of bytes. This does not allocate.
 convert_word_slice_to_byte_slice :: proc(buffer: []u32) -> []u8 {
-
 	bytes := transmute([]u8)mem.slice_ptr(
 		raw_data(buffer),
 		len(buffer) * size_of(u32),
@@ -209,12 +209,60 @@ convert_word_slice_to_byte_slice :: proc(buffer: []u32) -> []u8 {
 	return bytes
 }
 
-// TODO(Thomas): Unit testing
+@(test)
+test_convert_word_slice_to_byte_slice_and_back :: proc(t: ^testing.T) {
+	num_bytes := rand.int31_max(10_000)
+	words := make([]u32, num_bytes)
+	defer delete(words)
+
+	word_value: u32 = u32(rand.int31())
+
+	for &word in words {
+		word = word_value
+	}
+
+	bytes := convert_word_slice_to_byte_slice(words)
+	testing.expect_value(t, len(bytes), len(words) * size_of(u32))
+
+	new_words := convert_byte_slice_to_word_slice(bytes)
+	testing.expect_value(t, len(new_words), len(words))
+
+	for word in new_words {
+		testing.expect_value(t, word, word_value)
+	}
+}
+
 // TODO(Thomas): Does this belong in a util.odin or similar??
 // Converts a slice of bytes to a slice of words(u32). This does not allocate.
 convert_byte_slice_to_word_slice :: proc(buffer: []u8) -> []u32 {
-	words := transmute([]u32)mem.slice_ptr(raw_data(buffer), len(buffer))
+	words := transmute([]u32)mem.slice_ptr(
+		raw_data(buffer),
+		len(buffer) / size_of(u32),
+	)
 	return words
+}
+
+@(test)
+test_convert_byte_slice_to_word_slice_and_back :: proc(t: ^testing.T) {
+	num_bytes := rand.int31_max(10_000)
+	bytes := make([]u8, num_bytes)
+	defer delete(bytes)
+
+	byte_value: u8 = u8(rand.int31_max(i32(math.max(u8))))
+
+	for &b in bytes {
+		b = byte_value
+	}
+
+	words := convert_byte_slice_to_word_slice(bytes)
+	testing.expect_value(t, len(words), len(bytes) / size_of(u32))
+
+	new_bytes := convert_word_slice_to_byte_slice(words)
+	testing.expect_value(t, len(new_bytes), len(words) * size_of(u32))
+
+	for b in new_bytes {
+		testing.expect_value(t, b, byte_value)
+	}
 }
 
 // TODO(Thomas): There are certain things that are related between
