@@ -134,16 +134,17 @@ receive_packet_fragments :: proc(
 process_fragment :: proc(
 	sequence_buffer: ^Sequence_Buffer,
 	fragment_packet: Fragment_Packet,
+	allocator := context.temp_allocator,
 ) -> bool {
 
 	index := get_sequence_index(fragment_packet.sequence)
 
 	if sequence_buffer.sequence[index] == ENTRY_SENTINEL_VALUE {
 
-		data: [][]u8 = make([][]u8, MAX_FRAGMENTS_PER_PACKET)
+		data: [][]u8 = make([][]u8, MAX_FRAGMENTS_PER_PACKET, allocator)
 
 		for i in 0 ..< MAX_FRAGMENTS_PER_PACKET {
-			data[i] = make([]u8, MAX_FRAGMENT_SIZE)
+			data[i] = make([]u8, MAX_FRAGMENT_SIZE, allocator)
 		}
 
 		sequence_buffer.entries[index] = Entry {
@@ -773,6 +774,43 @@ test_serialize_split_and_reassemble_and_deserialize_test_packet :: proc(
 	testing.expect_value(t, test_packet, des_test_packet)
 }
 
+@(test)
+test_process_fragment :: proc(t: ^testing.T) {
+	sequence_buffer := new(Sequence_Buffer)
+	defer free(sequence_buffer)
+	init_sequence_buffer(sequence_buffer)
+
+
+	fragment_data := make([]u8, MAX_FRAGMENT_SIZE)
+	defer delete(fragment_data)
+
+	for &b in fragment_data {
+		b = u8(rand.int31_max(i32(math.max(u8)) + 1))
+	}
+
+	fragment_packet := Fragment_Packet {
+		sequence      = 0,
+		packet_type   = .Fragment,
+		fragment_id   = 0,
+		fragment_size = MAX_FRAGMENT_SIZE,
+		data          = fragment_data,
+	}
+
+	testing.expectf(
+		t,
+		process_fragment(sequence_buffer, fragment_packet),
+		"processing fragment packet should be successful",
+	)
+	defer free_all(context.temp_allocator)
+
+	for i in 0 ..< len(sequence_buffer.entries[0].fragments[0]) {
+		testing.expect_value(
+			t,
+			sequence_buffer.entries[0].fragments[0][i],
+			fragment_data[i],
+		)
+	}
+}
 
 //@(test)
 //test_process_packet :: proc(t: ^testing.T) {
