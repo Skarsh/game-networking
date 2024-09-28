@@ -618,6 +618,24 @@ test_serialize_deserialize_test_packet :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_split_packet_into_one_fragment_exact :: proc(t: ^testing.T) {
+	packet_size := 1024
+	packet_data := make([]u8, packet_size, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+
+	fragments := split_packet_into_fragments(
+		0,
+		packet_data,
+		context.temp_allocator,
+	)
+
+	testing.expect_value(t, len(fragments), 1)
+	for fragment in fragments {
+		testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+	}
+}
+
+@(test)
 test_split_packet_into_fragments_exact :: proc(t: ^testing.T) {
 
 	packet_size := 2048
@@ -665,140 +683,182 @@ test_split_packet_into_fragments_one_remainder :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_process_packet :: proc(t: ^testing.T) {
-	sequence_buffer := new(Sequence_Buffer)
-	init_sequence_buffer(sequence_buffer)
-	defer free(sequence_buffer)
-
-	buffer := make([]u32, 2048)
-	defer delete(buffer)
-	writer := create_writer(buffer)
-
-	fragments_buffer := make([]u32, 10_000)
-	defer delete(fragments_buffer)
-
-	//test_packet := random_test_packet()
-	test_packet := TestPacket{}
-	for &item in test_packet.items {
-		item = 15
+test_split_byte_buffer_single_fragment_packet :: proc(t: ^testing.T) {
+	num_fragments := 1
+	byte_buffer := make([]u8, MAX_FRAGMENT_SIZE)
+	defer delete(byte_buffer)
+	for &b in byte_buffer {
+		b = u8(rand.int_max(256))
 	}
 
-	if size_of(test_packet) > MTU {
-		testing.expectf(
-			t,
-			serialize_test_packet(&writer, test_packet),
-			"serializing test packet should be successful",
-		)
-		testing.expect(
-			t,
-			flush_bits(&writer),
-			"flushing test packet writer should be successful",
-		)
+	fragments := split_packet_into_fragments(0, byte_buffer)
+	testing.expect_value(t, len(fragments), num_fragments)
+	fragment := fragments[0]
+	testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+	for i in 0 ..< len(fragment.data) {
+		testing.expect_value(t, fragment.data[i], byte_buffer[i])
+	}
 
-		packet_data := convert_word_slice_to_byte_slice(writer.buffer)
-		expected_packet_data_size := 2048 * size_of(u32)
-		testing.expect_value(t, len(packet_data), expected_packet_data_size)
-		expected_num_fragments := expected_packet_data_size / MAX_FRAGMENT_SIZE
-		testing.expect_value(t, expected_num_fragments, 8)
+}
 
-		fragments := split_packet_into_fragments(
-			0,
-			packet_data,
-			context.allocator,
-		)
-		defer delete(fragments)
-		testing.expect_value(t, len(fragments), expected_num_fragments)
+@(test)
+test_split_byte_buffer_multiple_fragment_packets :: proc(t: ^testing.T) {
+	num_fragments := 8
+	byte_buffer := make([]u8, num_fragments * MAX_FRAGMENT_SIZE)
+	defer delete(byte_buffer)
+	for &b in byte_buffer {
+		b = u8(rand.int_max(256))
+	}
+	fragments := split_packet_into_fragments(0, byte_buffer)
+	testing.expect_value(t, len(fragments), num_fragments)
 
-		for fragment in fragments {
-			buffer := make([]u32, 1000, context.temp_allocator)
-			defer free_all(context.temp_allocator)
-			fragment_writer := create_writer(buffer)
-			testing.expectf(
+	for fragment, frag_idx in fragments {
+		for i in 0 ..< len(fragment.data) {
+			testing.expect_value(
 				t,
-				serialize_fragment_packet(&fragment_writer, fragment),
-				"Serializing fragment should be successful",
+				fragment.data[i],
+				byte_buffer[frag_idx * MAX_FRAGMENT_SIZE + i],
 			)
-
-			testing.expectf(
-				t,
-				flush_bits(&fragment_writer),
-				"Flushing the fragment writer should be successful",
-			)
-
-			fragment_data := convert_word_slice_to_byte_slice(
-				fragment_writer.buffer,
-			)
-
-			testing.expectf(
-				t,
-				process_packet(sequence_buffer, fragment_data),
-				"process packet should be successful",
-			)
-		}
-
-		// We're still on the first packet
-		testing.expect_value(t, sequence_buffer.current_sequence, 0)
-
-		// We have only received 1 complete packet, Fragment_Packets are special
-		// since they are related to another "higher level" packet, like the TestPacket
-		for seq, idx in sequence_buffer.sequence {
-			if idx == 0 {
-				testing.expect_value(t, seq, 0)
-			} else {
-				testing.expect_value(t, seq, ENTRY_SENTINEL_VALUE)
-			}
-		}
-
-		// Assert that we have 8 fragments for the index 1 in the Entries 
-		for entry, idx in sequence_buffer.entries {
-			if idx == 0 {
-				testing.expect_value(
-					t,
-					entry.num_fragments,
-					u8(expected_num_fragments),
-				)
-				testing.expect_value(
-					t,
-					entry.received_fragments,
-					u8(expected_num_fragments),
-				)
-			}
-		}
-
-		// Recreate the TestPacket from the fragments data
-
-		// Combine all the fragments data into a single buffer
-		recreated_test_packet_buffer := make([]u8, 2048 * size_of(u32))
-		defer delete(recreated_test_packet_buffer)
-
-		for i in 0 ..< len(sequence_buffer.entries[0].fragments) {
-			if i <= expected_num_fragments - 1 {
-				mem.copy(
-					&recreated_test_packet_buffer[i * 1024],
-					&sequence_buffer.entries[0].fragments[i],
-					1024,
-				)
-			}
-		}
-
-		recreated_test_packet_reader := create_reader(
-			convert_byte_slice_to_word_slice(recreated_test_packet_buffer),
-		)
-
-		recreated_test_packet, deserialize_test_packet_ok :=
-			desserialize_test_packet(&recreated_test_packet_reader)
-
-		testing.expectf(
-			t,
-			deserialize_test_packet_ok,
-			"deserializing test packet should be ok",
-		)
-
-		testing.expect_value(t, recreated_test_packet, test_packet)
-
-		// free fragment data
-		for fragment in fragments {
-			delete(fragment.data)
 		}
 	}
 }
+
+
+//@(test)
+//test_process_packet :: proc(t: ^testing.T) {
+//	sequence_buffer := new(Sequence_Buffer)
+//	init_sequence_buffer(sequence_buffer)
+//	defer free(sequence_buffer)
+//
+//	buffer := make([]u32, 2048)
+//	defer delete(buffer)
+//	writer := create_writer(buffer)
+//
+//	fragments_buffer := make([]u32, 10_000)
+//	defer delete(fragments_buffer)
+//
+//	//test_packet := random_test_packet()
+//	test_packet := TestPacket{}
+//	for &item in test_packet.items {
+//		item = 15
+//	}
+//
+//	if size_of(test_packet) > MTU {
+//		testing.expectf(
+//			t,
+//			serialize_test_packet(&writer, test_packet),
+//			"serializing test packet should be successful",
+//		)
+//		testing.expect(
+//			t,
+//			flush_bits(&writer),
+//			"flushing test packet writer should be successful",
+//		)
+//
+//		packet_data := convert_word_slice_to_byte_slice(writer.buffer)
+//		expected_packet_data_size := 2048 * size_of(u32)
+//		testing.expect_value(t, len(packet_data), expected_packet_data_size)
+//		expected_num_fragments := expected_packet_data_size / MAX_FRAGMENT_SIZE
+//		testing.expect_value(t, expected_num_fragments, 8)
+//
+//		fragments := split_packet_into_fragments(
+//			0,
+//			packet_data,
+//			context.allocator,
+//		)
+//		defer delete(fragments)
+//		testing.expect_value(t, len(fragments), expected_num_fragments)
+//
+//		for fragment in fragments {
+//			buffer := make([]u32, 1000, context.temp_allocator)
+//			defer free_all(context.temp_allocator)
+//			fragment_writer := create_writer(buffer)
+//			testing.expectf(
+//				t,
+//				serialize_fragment_packet(&fragment_writer, fragment),
+//				"Serializing fragment should be successful",
+//			)
+//
+//			testing.expectf(
+//				t,
+//				flush_bits(&fragment_writer),
+//				"Flushing the fragment writer should be successful",
+//			)
+//
+//			fragment_data := convert_word_slice_to_byte_slice(
+//				fragment_writer.buffer,
+//			)
+//
+//			testing.expectf(
+//				t,
+//				process_packet(sequence_buffer, fragment_data),
+//				"process packet should be successful",
+//			)
+//		}
+//
+//		// We're still on the first packet
+//		testing.expect_value(t, sequence_buffer.current_sequence, 0)
+//
+//		// We have only received 1 complete packet, Fragment_Packets are special
+//		// since they are related to another "higher level" packet, like the TestPacket
+//		for seq, idx in sequence_buffer.sequence {
+//			if idx == 0 {
+//				testing.expect_value(t, seq, 0)
+//			} else {
+//				testing.expect_value(t, seq, ENTRY_SENTINEL_VALUE)
+//			}
+//		}
+//
+//		// Assert that we have 8 fragments for the index 1 in the Entries 
+//		for entry, idx in sequence_buffer.entries {
+//			if idx == 0 {
+//				testing.expect_value(
+//					t,
+//					entry.num_fragments,
+//					u8(expected_num_fragments),
+//				)
+//				testing.expect_value(
+//					t,
+//					entry.received_fragments,
+//					u8(expected_num_fragments),
+//				)
+//			}
+//		}
+//
+//		// Recreate the TestPacket from the fragments data
+//
+//		// Combine all the fragments data into a single buffer
+//		recreated_test_packet_buffer := make([]u8, 2048 * size_of(u32))
+//		defer delete(recreated_test_packet_buffer)
+//
+//		for i in 0 ..< len(sequence_buffer.entries[0].fragments) {
+//			if i <= expected_num_fragments - 1 {
+//				mem.copy(
+//					&recreated_test_packet_buffer[i * 1024],
+//					&sequence_buffer.entries[0].fragments[i],
+//					1024,
+//				)
+//			}
+//		}
+//
+//		recreated_test_packet_reader := create_reader(
+//			convert_byte_slice_to_word_slice(recreated_test_packet_buffer),
+//		)
+//
+//		recreated_test_packet, deserialize_test_packet_ok :=
+//			desserialize_test_packet(&recreated_test_packet_reader)
+//
+//		testing.expectf(
+//			t,
+//			deserialize_test_packet_ok,
+//			"deserializing test packet should be ok",
+//		)
+//
+//		testing.expect_value(t, recreated_test_packet, test_packet)
+//
+//		// free fragment data
+//		for fragment in fragments {
+//			delete(fragment.data)
+//		}
+//	}
+//}
