@@ -723,6 +723,56 @@ test_split_byte_buffer_multiple_fragment_packets :: proc(t: ^testing.T) {
 	}
 }
 
+@(test)
+test_serialize_split_and_reassemble_and_deserialize_test_packet :: proc(
+	t: ^testing.T,
+) {
+	test_packet := random_test_packet()
+	buffer := make([]u32, 2048)
+	defer delete(buffer)
+	writer := create_writer(buffer)
+
+	testing.expectf(
+		t,
+		serialize_test_packet(&writer, test_packet),
+		"serializing test packet should be successful",
+	)
+
+	testing.expectf(
+		t,
+		flush_bits(&writer),
+		"flusing test packet writer should be successful",
+	)
+
+	fragments := split_packet_into_fragments(
+		0,
+		convert_word_slice_to_byte_slice(writer.buffer),
+	)
+	testing.expect_value(t, len(fragments), 8)
+
+	fragment_data_buffer := make([]u8, 2048 * size_of(u32))
+	defer delete(fragment_data_buffer)
+
+	for fragment in fragments {
+		testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+
+		mem.copy(
+			&fragment_data_buffer[int(fragment.fragment_id) * MAX_FRAGMENT_SIZE],
+			&fragment.data[0],
+			len(fragment.data),
+		)
+	}
+
+	fragment_data_buffer_words := convert_byte_slice_to_word_slice(
+		fragment_data_buffer,
+	)
+	reader := create_reader(fragment_data_buffer_words)
+	des_test_packet, ok := desserialize_test_packet(&reader)
+	testing.expectf(t, ok, "deserializing test packet should be successful")
+
+	testing.expect_value(t, test_packet, des_test_packet)
+}
+
 
 //@(test)
 //test_process_packet :: proc(t: ^testing.T) {
