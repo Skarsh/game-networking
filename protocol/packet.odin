@@ -812,6 +812,40 @@ test_process_fragment :: proc(t: ^testing.T) {
 	}
 }
 
+@(test)
+test_process_multiple_fragments :: proc(t: ^testing.T) {
+	sequence_buffer := new(Sequence_Buffer)
+	defer free(sequence_buffer)
+	init_sequence_buffer(sequence_buffer)
+
+	num_fragments := 8
+	packet_data := make([]u8, num_fragments * MAX_FRAGMENT_SIZE)
+	for &b in packet_data {
+		b = u8(rand.int31_max(i32(math.max(u8)) + 1))
+	}
+	defer delete(packet_data)
+	fragments := split_packet_into_fragments(0, packet_data)
+
+	for fragment in fragments {
+		testing.expectf(
+			t,
+			process_fragment(sequence_buffer, fragment),
+			"process_fragment should be successful",
+		)
+	}
+	defer free_all(context.temp_allocator)
+
+	for frag_idx in 0 ..< num_fragments {
+		for i in 0 ..< len(sequence_buffer.entries[0].fragments[frag_idx]) {
+			testing.expect_value(
+				t,
+				packet_data[frag_idx * MAX_FRAGMENT_SIZE + i],
+				sequence_buffer.entries[0].fragments[frag_idx][i],
+			)
+		}
+	}
+}
+
 //@(test)
 //test_process_packet :: proc(t: ^testing.T) {
 //	sequence_buffer := new(Sequence_Buffer)
