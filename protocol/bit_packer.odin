@@ -248,7 +248,7 @@ test_convert_byte_slice_to_word_slice_and_back :: proc(t: ^testing.T) {
 	bytes := make([]u8, num_bytes)
 	defer delete(bytes)
 
-	byte_value: u8 = u8(rand.int31_max(i32(math.max(u8))))
+	byte_value: u8 = u8(rand.int31_max(i32(math.max(u8)) + 1))
 
 	for &b in bytes {
 		b = byte_value
