@@ -707,7 +707,7 @@ test_split_byte_buffer_multiple_fragment_packets :: proc(t: ^testing.T) {
 	byte_buffer := make([]u8, num_fragments * MAX_FRAGMENT_SIZE)
 	defer delete(byte_buffer)
 	for &b in byte_buffer {
-		b = u8(rand.int_max(256))
+		b = u8(rand.int31_max(i32(math.max(u8)) + 1))
 	}
 	fragments := split_packet_into_fragments(0, byte_buffer)
 	testing.expect_value(t, len(fragments), num_fragments)
