@@ -1415,3 +1415,136 @@ test_read_bytes :: proc(t: ^testing.T) {
 		testing.expect_value(t, reader.bits_read, 24)
 	}
 }
+
+@(test)
+test_write_and_read_bytes :: proc(t: ^testing.T) {
+	num_words := 100
+	buffer := make([]u32, num_words)
+	defer delete(buffer)
+
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+
+	random_bytes := make([]u8, num_words * size_of(u32))
+	defer delete(random_bytes)
+
+	for &b in random_bytes {
+		b = u8(rand.int31_max(i32(math.max(u8)) + 1))
+	}
+
+	testing.expectf(
+		t,
+		write_bytes(&writer, random_bytes),
+		"write_bytes should be successful",
+	)
+
+	des_bytes := make([]u8, num_words * size_of(u32))
+	defer delete(des_bytes)
+	des_bytes_ok := read_bytes(&reader, des_bytes, u32(len(des_bytes)))
+	testing.expectf(t, des_bytes_ok, "read_bytes should be successful")
+
+	testing.expect_value(t, len(des_bytes), len(random_bytes))
+
+	for i in 0 ..< len(des_bytes) {
+		testing.expect_value(t, des_bytes[i], random_bytes[i])
+	}
+}
+
+@(test)
+test_multiple_write_and_single_read_bytes :: proc(t: ^testing.T) {
+	num_words := 100
+	buffer := make([]u32, num_words)
+	defer delete(buffer)
+
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+
+	random_bytes := make([]u8, num_words * size_of(u32))
+	defer delete(random_bytes)
+
+	for &b in random_bytes {
+		b = u8(rand.int31_max(i32(math.max(u8)) + 1))
+	}
+
+	testing.expectf(
+		t,
+		write_bytes(&writer, random_bytes[:len(random_bytes) / 2]),
+		"write_bytes should be successful",
+	)
+
+	testing.expectf(
+		t,
+		write_bytes(
+			&writer,
+			random_bytes[len(random_bytes) / 2:len(random_bytes)],
+		),
+		"write_bytes should be successful",
+	)
+
+	des_bytes := make([]u8, num_words * size_of(u32))
+	defer delete(des_bytes)
+	des_bytes_ok := read_bytes(&reader, des_bytes, u32(len(des_bytes)))
+	testing.expectf(t, des_bytes_ok, "read_bytes should be successful")
+
+	testing.expect_value(t, len(des_bytes), len(random_bytes))
+
+	for i in 0 ..< len(des_bytes) {
+		testing.expect_value(t, des_bytes[i], random_bytes[i])
+	}
+}
+
+@(test)
+test_multiple_write_and_multiple_read_bytes :: proc(t: ^testing.T) {
+	num_words := 100
+	buffer := make([]u32, num_words)
+	defer delete(buffer)
+
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+
+	random_bytes := make([]u8, num_words * size_of(u32))
+	defer delete(random_bytes)
+
+	for &b in random_bytes {
+		b = u8(rand.int31_max(i32(math.max(u8)) + 1))
+	}
+
+	testing.expectf(
+		t,
+		write_bytes(&writer, random_bytes[:len(random_bytes) / 2]),
+		"write_bytes should be successful",
+	)
+
+	testing.expectf(
+		t,
+		write_bytes(
+			&writer,
+			random_bytes[len(random_bytes) / 2:len(random_bytes)],
+		),
+		"write_bytes should be successful",
+	)
+
+	des_bytes := make([]u8, num_words * size_of(u32))
+	defer delete(des_bytes)
+	des_bytes_ok: bool
+
+	des_bytes_ok = read_bytes(
+		&reader,
+		des_bytes[0:len(des_bytes) / 2],
+		u32(len(des_bytes) / 2),
+	)
+	testing.expectf(t, des_bytes_ok, "read_bytes should be successful")
+
+	des_bytes_ok = read_bytes(
+		&reader,
+		des_bytes[len(des_bytes) / 2:len(des_bytes)],
+		u32(len(des_bytes) / 2),
+	)
+	testing.expectf(t, des_bytes_ok, "read_bytes should be successful")
+
+	testing.expect_value(t, len(des_bytes), len(random_bytes))
+
+	for i in 0 ..< len(des_bytes) {
+		testing.expect_value(t, des_bytes[i], random_bytes[i])
+	}
+}
