@@ -115,21 +115,54 @@ advance_sequence :: proc(sequence_buffer: ^Sequence_Buffer) {
 	sequence_buffer.current_sequence += 1
 }
 
-// TODO(Thomas): A lot of functionality missing, just sketching stuff out right now
+// The purpose of this procedure is to check if all fragments of a packet has been
+// received, if it has, then we reassmble the original packet. This should again be called
+// from another procedure that does for the the entire Sequence_Buffer
 receive_packet_fragments :: proc(
 	sequence_buffer: ^Sequence_Buffer,
-	fragment_packet: Fragment_Packet,
+	sequence: u16,
+	allocator := context.temp_allocator,
+) -> (
+	[]u8,
+	bool,
 ) {
-	// TODO(Thomas): All this probably belongs in the process_fragment procedure
-	//index := get_sequence_index(fragment_packet.sequence)
+	// check if the sequence is valid and set
+	if sequence_buffer.sequence[sequence] != u32(sequence) {
+		return nil, false
+	}
 
-	//if sequence_buffer.sequence[index] == ENTRY_SENTINEL_VALUE {
-	//	entry := Entry {
-	//		num_fragments      = fragment_packet.num_fragments,
-	//		received_fragments = 0,
-	//	}
-	//	sequence_buffer.entries[index] = entry
-	//}
+	// get the entry
+	entry := sequence_buffer.entries[sequence]
+
+	// check if the amount of received fragments is equal to the amount of expected fragments
+	if entry.received_fragments != entry.num_fragments {
+		return nil, false
+	}
+
+	// calculate the total packet size
+	total_packet_size := 0
+	for fragment in entry.fragments {
+		total_packet_size += len(fragment)
+	}
+
+	assert(total_packet_size > 0)
+	assert(total_packet_size <= MAX_FRAGMENT_SIZE)
+
+	// reassemble the packet, just the bytes though
+	packet_data := make([]u8, total_packet_size)
+	current_memory_offset := 0
+	for fragment in entry.fragments {
+		fragment_size := len(fragment)
+		mem.copy(
+			&packet_data[current_memory_offset],
+			&fragment[0],
+			fragment_size,
+		)
+
+		current_memory_offset += fragment_size
+	}
+
+	return packet_data, true
 }
 
 // TODO(Thomas): Continue here
@@ -145,9 +178,11 @@ process_fragment :: proc(
 
 		data: [][]u8 = make([][]u8, MAX_FRAGMENTS_PER_PACKET, allocator)
 
-		for i in 0 ..< MAX_FRAGMENTS_PER_PACKET {
-			data[i] = make([]u8, MAX_FRAGMENT_SIZE, allocator)
-		}
+		data[fragment_packet.fragment_id] = make(
+			[]u8,
+			fragment_packet.fragment_size,
+			allocator,
+		)
 
 		sequence_buffer.entries[index] = Entry {
 			num_fragments      = fragment_packet.num_fragments,
@@ -161,7 +196,8 @@ process_fragment :: proc(
 			len(fragment_packet.data),
 		)
 
-		assert(len(fragment_packet.data) == MAX_FRAGMENT_SIZE)
+		assert(len(fragment_packet.data) > 0)
+		assert(len(fragment_packet.data) <= MAX_FRAGMENT_SIZE)
 
 		sequence_buffer.entries[index].received_fragments += 1
 
@@ -170,12 +206,19 @@ process_fragment :: proc(
 		sequence_buffer.current_sequence = u32(fragment_packet.sequence)
 
 	} else {
+
+		assert(len(fragment_packet.data) > 0)
+		assert(fragment_packet.fragment_size <= MAX_FRAGMENT_SIZE)
+
+		sequence_buffer.entries[index].fragments[fragment_packet.fragment_id] =
+			make([]u8, fragment_packet.fragment_size, allocator)
+
 		sequence_buffer.entries[index].received_fragments += 1
 
 		sequence_buffer.entries[index].num_fragments =
 			fragment_packet.num_fragments
 
-		assert(len(fragment_packet.data) == MAX_FRAGMENT_SIZE)
+		assert(len(fragment_packet.data) <= MAX_FRAGMENT_SIZE)
 
 		mem.copy(
 			&sequence_buffer.entries[index].fragments[fragment_packet.fragment_id][0],
@@ -960,4 +1003,14 @@ test_process_packet :: proc(t: ^testing.T) {
 			testing.expect_value(t, entry.received_fragments, 0)
 		}
 	}
+}
+
+@(test)
+test_receive_packet_fragments :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	sequence_buffer := new(Sequence_Buffer)
+	defer free(sequence_buffer)
+
+	sequence := 0
+
 }
