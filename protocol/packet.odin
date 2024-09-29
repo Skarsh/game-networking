@@ -881,9 +881,11 @@ test_process_packet :: proc(t: ^testing.T) {
 	testing.expect_value(t, num_fragments, 8)
 
 	for fragment in fragments {
-		// TODO(Thomas): We should only use the necessary size here, which is the size of the
-		// packet header and then the MAX_FRAGMENT_SIZE for the data.
-		fragment_writer_buffer := make([]u32, 1000, context.temp_allocator)
+		fragment_writer_buffer := make(
+			[]u32,
+			(FRAGMENT_PACKET_HEADER_SIZE + MAX_FRAGMENT_SIZE) / size_of(u32),
+			context.temp_allocator,
+		)
 
 		fragment_writer := create_writer(fragment_writer_buffer)
 
