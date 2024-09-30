@@ -115,12 +115,15 @@ advance_sequence :: proc(sequence_buffer: ^Sequence_Buffer) {
 	sequence_buffer.current_sequence += 1
 }
 
+
+// TODO(Thomas): Think about allocation here, this is where we need to free the fragments too?
+// so we need an allocation strategy that only deallocates the fragments that have been reassembled
 // The purpose of this procedure is to check if all fragments of a packet has been
 // received, if it has, then we reassmble the original packet. This should again be called
 // from another procedure that does for the the entire Sequence_Buffer
 receive_packet_fragments :: proc(
 	sequence_buffer: ^Sequence_Buffer,
-	sequence: u16,
+	sequence: u32,
 	allocator := context.temp_allocator,
 ) -> (
 	[]u8,
@@ -146,12 +149,13 @@ receive_packet_fragments :: proc(
 	}
 
 	assert(total_packet_size > 0)
-	assert(total_packet_size <= MAX_FRAGMENT_SIZE)
+	assert(total_packet_size <= MAX_PACKET_SIZE)
 
 	// reassemble the packet, just the bytes though
-	packet_data := make([]u8, total_packet_size)
+	packet_data := make([]u8, total_packet_size, allocator)
 	current_memory_offset := 0
-	for fragment in entry.fragments {
+	for idx in 0 ..< entry.num_fragments {
+		fragment := entry.fragments[idx]
 		fragment_size := len(fragment)
 		mem.copy(
 			&packet_data[current_memory_offset],
@@ -165,13 +169,14 @@ receive_packet_fragments :: proc(
 	return packet_data, true
 }
 
-// TODO(Thomas): Continue here
 process_fragment :: proc(
 	sequence_buffer: ^Sequence_Buffer,
 	fragment_packet: Fragment_Packet,
 	allocator := context.temp_allocator,
 ) -> bool {
 
+	assert(len(fragment_packet.data) > 0)
+	assert(len(fragment_packet.data) <= MAX_FRAGMENT_SIZE)
 	index := get_sequence_index(fragment_packet.sequence)
 
 	if sequence_buffer.sequence[index] == ENTRY_SENTINEL_VALUE {
@@ -196,9 +201,6 @@ process_fragment :: proc(
 			len(fragment_packet.data),
 		)
 
-		assert(len(fragment_packet.data) > 0)
-		assert(len(fragment_packet.data) <= MAX_FRAGMENT_SIZE)
-
 		sequence_buffer.entries[index].received_fragments += 1
 
 		// TODO(Thomas): Is this correct??
@@ -207,9 +209,6 @@ process_fragment :: proc(
 
 	} else {
 
-		assert(len(fragment_packet.data) > 0)
-		assert(fragment_packet.fragment_size <= MAX_FRAGMENT_SIZE)
-
 		sequence_buffer.entries[index].fragments[fragment_packet.fragment_id] =
 			make([]u8, fragment_packet.fragment_size, allocator)
 
@@ -217,8 +216,6 @@ process_fragment :: proc(
 
 		sequence_buffer.entries[index].num_fragments =
 			fragment_packet.num_fragments
-
-		assert(len(fragment_packet.data) <= MAX_FRAGMENT_SIZE)
 
 		mem.copy(
 			&sequence_buffer.entries[index].fragments[fragment_packet.fragment_id][0],
@@ -234,8 +231,19 @@ process_fragment :: proc(
 	return true
 }
 
-// TODO(Thomas): Add checks for the size of the data
 process_packet :: proc(sequence_buffer: ^Sequence_Buffer, data: []u8) -> bool {
+	// TODO(Thomas): Remove assert in favour of returning false when confident
+	assert(len(data) > 0)
+	if (len(data) <= 0) {
+		return false
+	}
+
+	// TODO(Thomas): Remove assert in favour of returning false when confident
+	assert(len(data) <= MAX_PACKET_SIZE)
+	if (len(data) > MAX_PACKET_SIZE) {
+		return false
+	}
+
 	words := convert_byte_slice_to_word_slice(data)
 	reader := create_reader(words)
 
@@ -1010,7 +1018,87 @@ test_receive_packet_fragments :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 	sequence_buffer := new(Sequence_Buffer)
 	defer free(sequence_buffer)
+	init_sequence_buffer(sequence_buffer)
 
-	sequence := 0
+	sequence: u32 = 0
+	test_packet := random_test_packet()
 
+	writer_buffer := make([]u32, 2048)
+	defer delete(writer_buffer)
+	writer := create_writer(writer_buffer)
+
+	testing.expectf(
+		t,
+		serialize_test_packet(&writer, test_packet),
+		"serialize_test_packet should be successful",
+	)
+
+	testing.expectf(t, flush_bits(&writer), "flush_bits should be successful")
+
+	fragments := split_packet_into_fragments(
+		u16(sequence),
+		convert_word_slice_to_byte_slice(writer.buffer),
+	)
+
+	num_fragments := len(fragments)
+	testing.expect_value(t, num_fragments, 8)
+
+	for fragment in fragments {
+		fragment_writer_buffer := make(
+			[]u32,
+			(FRAGMENT_PACKET_HEADER_SIZE + MAX_FRAGMENT_SIZE) / size_of(u32),
+			context.temp_allocator,
+		)
+
+		fragment_writer := create_writer(fragment_writer_buffer)
+
+		testing.expectf(
+			t,
+			serialize_fragment_packet(&fragment_writer, fragment),
+			"serializing_fragment_packet should be successful",
+		)
+
+		testing.expectf(
+			t,
+			flush_bits(&fragment_writer),
+			"flush_bits should be successful",
+		)
+
+		testing.expectf(
+			t,
+			process_packet(
+				sequence_buffer,
+				convert_word_slice_to_byte_slice(fragment_writer_buffer),
+			),
+			"process_packet should be successful",
+		)
+	}
+
+	packet_data, receive_packet_fragments_ok := receive_packet_fragments(
+		sequence_buffer,
+		sequence,
+		context.temp_allocator,
+	)
+
+	testing.expectf(
+		t,
+		receive_packet_fragments_ok,
+		"receive_packet_fragments should be successful",
+	)
+
+	test_packet_reader := create_reader(
+		convert_byte_slice_to_word_slice(packet_data),
+	)
+
+	des_test_packet, des_test_packet_ok := desserialize_test_packet(
+		&test_packet_reader,
+	)
+
+	testing.expectf(
+		t,
+		des_test_packet_ok,
+		"deserialize_test_packet should be successful",
+	)
+
+	testing.expect_value(t, des_test_packet, test_packet)
 }
