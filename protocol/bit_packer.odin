@@ -20,6 +20,18 @@ Bit_Writer :: struct {
 	bits_written: u32,
 }
 
+reset_writer :: proc(writer: ^Bit_Writer) {
+
+	for &word in writer.buffer {
+		word = 0
+	}
+
+	writer.scratch = 0
+	writer.scratch_bits = 0
+	writer.word_index = 0
+	writer.bits_written = 0
+}
+
 create_writer :: proc(buffer: []u32) -> Bit_Writer {
 	bit_writer := Bit_Writer {
 		buffer       = buffer,
