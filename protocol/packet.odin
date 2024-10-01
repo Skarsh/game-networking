@@ -19,21 +19,21 @@ MAX_PACKET_SIZE :: MAX_FRAGMENTS_PER_PACKET * MAX_FRAGMENT_SIZE
 // requires this to have more than one variant
 Packet_Type :: enum {
 	Fragment,
-	TestPacket,
+	Test_Packet,
 }
 
 // Packet that should be larger than the MTU, so that we have to split it up into 
 // mutlple Fragment_Packet, but smaller than the MAX_PACKET_SIZE.
-TestPacket :: struct {
+Test_Packet :: struct {
 	items: [2048]i32,
 }
 
 serialize_test_packet :: proc(
 	bit_writer: ^Bit_Writer,
-	test_packet: TestPacket,
+	test_packet: Test_Packet,
 ) -> bool {
 	for item in test_packet.items {
-		if !serialize_integer(bit_writer, item, 0, math.max(i32)) {
+		if !serialize_integer(bit_writer, item, math.min(i32), math.max(i32)) {
 			return false
 		}
 	}
@@ -44,14 +44,18 @@ serialize_test_packet :: proc(
 desserialize_test_packet :: proc(
 	bit_reader: ^Bit_Reader,
 ) -> (
-	TestPacket,
+	Test_Packet,
 	bool,
 ) {
-	test_packet := TestPacket{}
+	test_packet := Test_Packet{}
 	for i in 0 ..< len(test_packet.items) {
-		item, ok := deserialize_integer(bit_reader, 0, math.max(i32))
+		item, ok := deserialize_integer(
+			bit_reader,
+			math.min(i32),
+			math.max(i32),
+		)
 		if !ok {
-			return TestPacket{}, false
+			return Test_Packet{}, false
 		}
 		test_packet.items[i] = item
 	}
@@ -59,8 +63,8 @@ desserialize_test_packet :: proc(
 	return test_packet, true
 }
 
-random_test_packet :: proc() -> TestPacket {
-	test_packet := TestPacket{}
+random_test_packet :: proc() -> Test_Packet {
+	test_packet := Test_Packet{}
 	for i in 0 ..< len(test_packet.items) {
 		test_packet.items[i] = rand.int31()
 	}
@@ -110,7 +114,8 @@ get_sequence_index :: proc(sequence: u16) -> i32 {
 	return i32(sequence % MAX_ENTRIES)
 }
 
-// TODO(Thomas): A lot of functionality is missing, just sketching stuff out right now
+// Advances the current sequence number forward.
+// TODO(Thomas): Needs to deal with wrapping sequence numbers
 advance_sequence :: proc(sequence_buffer: ^Sequence_Buffer) {
 	sequence_buffer.current_sequence += 1
 }
