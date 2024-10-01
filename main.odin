@@ -6,9 +6,110 @@ import "core:mem"
 
 import proto "protocol"
 
-main :: proc() {
-	using proto
+MAX_OUTGOING_PACKETS :: 256
 
+Packet_Queue :: struct {
+	current_idx: u32,
+	packets:     [MAX_OUTGOING_PACKETS]Packet,
+}
+
+enqueue_packet :: proc(packet_queue: ^Packet_Queue, packet: Packet) -> bool {
+	if packet_queue.current_idx >= MAX_OUTGOING_PACKETS {
+		return false
+	}
+	packet_queue.packets[packet_queue.current_idx] = packet
+	packet_queue.current_idx += 1
+	return true
+}
+
+// Add more packet types, this is high-level packets??
+Packet :: union {
+	proto.Test_Packet,
+}
+
+Packet_Stream :: struct {
+	packet_writer:   proto.Bit_Writer,
+	fragment_writer: proto.Bit_Writer,
+	packet_queue:    ^Packet_Queue,
+}
+
+Network_Queue :: struct {
+	packet_queue: [MAX_OUTGOING_PACKETS][]u8,
+}
+
+create_packet_stream :: proc(allocator := context.allocator) -> Packet_Stream {
+	packet_buffer := make([]u32, 1000_000, allocator)
+	packet_writer := proto.create_writer(packet_buffer)
+
+	fragment_buffer := make([]u32, 1000_000, allocator)
+	fragment_writer := proto.create_writer(fragment_buffer)
+
+	packet_queue := new(Packet_Queue, allocator)
+
+	return Packet_Stream{packet_writer, fragment_writer, packet_queue}
+
+}
+
+destroy_packet_stream :: proc(packet_stream: ^Packet_Stream) {
+	delete(packet_stream.packet_writer.buffer)
+	delete(packet_stream.fragment_writer.buffer)
+	free(packet_stream.packet_queue)
+}
+
+// TODO(Thomas): Error handling
+send_stream :: proc(packet_stream: ^Packet_Stream) {
+	for i in 0 ..< packet_stream.packet_queue.current_idx {
+		// 1. Serialize the packet
+		assert(
+			serialize_packet(
+				&packet_stream.packet_writer,
+				packet_stream.packet_queue.packets[i],
+			),
+		)
+
+		// 2. Get the packet bytes
+		packet_bytes := proto.convert_word_slice_to_byte_slice(
+			packet_stream.packet_writer.buffer[0:packet_stream.packet_writer.word_index],
+		)
+
+		proto.reset_writer(&packet_stream.packet_writer)
+
+		// 3. Check if the length of the packet is larger than MTU, meaning that we need to split it
+		// into fragments
+		if len(packet_bytes) > proto.MTU {
+			log.infof("len(packet_bytes) is %v", len(packet_bytes))
+
+			fragments := proto.split_packet_into_fragments(
+				u16(i),
+				packet_bytes,
+			)
+
+			// 4. Write all the fragments into Network_Queue
+		} else {
+			// If not just write the packet bytes directly into the Network_Queue
+		}
+	}
+}
+
+serialize_packet :: proc(
+	bit_writer: ^proto.Bit_Writer,
+	packet: Packet,
+) -> bool {
+	switch p in packet {
+	case proto.Test_Packet:
+		if !proto.serialize_test_packet(bit_writer, p) {
+			return false
+		}
+
+		if !proto.flush_bits(bit_writer) {
+			return false
+		}
+	}
+	return true
+}
+
+// TODO(Thomas): What about tracking for 
+main :: proc() {
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
 	context.allocator = mem.tracking_allocator(&track)
@@ -39,67 +140,14 @@ main :: proc() {
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
-	sequence_buffer := new(Sequence_Buffer, context.allocator)
-	defer free(sequence_buffer)
-	init_sequence_buffer(sequence_buffer)
 
-	// Simple red thread test for packet fragmentation and reassembly, no network related stuff yet.
-	// 
-	// Sending side: 
-	// Make a packet that is bigger than the max packet size, so it has to be
-	// split up into packet fragments. Write a simple split_packet_into_fragments procedure.
-	// Then for each packet fragment write serialize them and write each of them into a buffer.
-	//
-	// Receiving side: 
-	// Deserialize the byte buffer into an array of fragment packets
-	// Utilize the sequence buffer here
-	// Finally reconstruct the original packet from the fragment packets.
+	packet_stream := create_packet_stream()
+	defer destroy_packet_stream(&packet_stream)
 
-	// NOTE(Thomas): It makes more sense to use the context.temp_allocator or some Scratch / Arena
-	// allocator, but it's nice to use the context.allocator here now for tracking purposes.
-	buffer := make([]u32, 2048, context.allocator)
-	defer delete(buffer)
-	writer := create_writer(buffer)
-
-	fragments_buffer := make([]u32, 10_000, context.allocator)
-	defer delete(fragments_buffer)
-
-	// Sending
-	test_packet := proto.random_test_packet()
-	log.infof("test_packet size: %v", size_of(test_packet))
-	if size_of(test_packet) > proto.MTU {
-		// We need to split this into fragments
-		log.info("Splitting packet into fragments")
-		assert(serialize_test_packet(&writer, test_packet))
-		assert(flush_bits(&writer))
-
-		packet_data := convert_word_slice_to_byte_slice(writer.buffer)
-		assert(len(packet_data) == 2048 * size_of(u32))
-		words := convert_byte_slice_to_word_slice(packet_data)
-
-		// Not relevant for this exact test, but good for ensuring that de-/serialize works
-		reader := create_reader(words)
-		packet, des_ok := desserialize_test_packet(&reader)
-		assert(des_ok)
-		assert(test_packet == packet)
-
-		fragments := split_packet_into_fragments(
-			0,
-			packet_data,
-			context.allocator,
-		)
-		defer delete(fragments)
-
-		fragments_writer := create_writer(fragments_buffer)
-		assert(serialize_fragment_packets(&fragments_writer, fragments))
-		assert(flush_bits(&fragments_writer))
-
-
-		// free fragment data
-		for fragment in fragments {
-			delete(fragment.data)
-		}
+	for i in 0 ..< MAX_OUTGOING_PACKETS {
+		test_packet := proto.random_test_packet()
+		assert(enqueue_packet(packet_stream.packet_queue, test_packet))
 	}
 
-	// Receiving
+	send_stream(&packet_stream)
 }
