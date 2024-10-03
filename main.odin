@@ -1,5 +1,6 @@
 package main
 
+import queue "core:container/queue"
 import "core:fmt"
 import "core:log"
 import "core:mem"
@@ -33,21 +34,44 @@ Packet_Stream :: struct {
 	packet_queue:    ^Packet_Queue,
 }
 
-Network_Queue :: struct {
-	packet_queue: [MAX_OUTGOING_PACKETS][]u8,
+Packet_Read_Stream :: struct {
+	packet_reader:   proto.Bit_Reader,
+	fragment_reader: proto.Bit_Reader,
+	packet_queue:    ^Packet_Queue,
 }
 
+create_packet_read_stream :: proc(
+	allocator := context.allocator,
+) -> Packet_Read_Stream {
+	packet_buffer := make([]u32, 1_000_000, allocator)
+	packet_reader := proto.create_reader(packet_buffer)
+
+	fragment_buffer := make([]u32, 1_000_000, allocator)
+	fragment_reader := proto.create_reader(fragment_buffer)
+
+	packet_queue := new(Packet_Queue, allocator)
+
+	return Packet_Read_Stream{packet_reader, fragment_reader, packet_queue}
+}
+
+destroy_packet_read_stream :: proc(packet_read_stream: ^Packet_Read_Stream) {
+	delete(packet_read_stream.packet_reader.buffer)
+	delete(packet_read_stream.fragment_reader.buffer)
+	free(packet_read_stream.packet_queue)
+}
+
+Network_Queue :: queue.Queue([]u8)
+
 create_packet_stream :: proc(allocator := context.allocator) -> Packet_Stream {
-	packet_buffer := make([]u32, 1000_000, allocator)
+	packet_buffer := make([]u32, 1_000_000, allocator)
 	packet_writer := proto.create_writer(packet_buffer)
 
-	fragment_buffer := make([]u32, 1000_000, allocator)
+	fragment_buffer := make([]u32, 1_000_000, allocator)
 	fragment_writer := proto.create_writer(fragment_buffer)
 
 	packet_queue := new(Packet_Queue, allocator)
 
 	return Packet_Stream{packet_writer, fragment_writer, packet_queue}
-
 }
 
 destroy_packet_stream :: proc(packet_stream: ^Packet_Stream) {
@@ -56,8 +80,20 @@ destroy_packet_stream :: proc(packet_stream: ^Packet_Stream) {
 	free(packet_stream.packet_queue)
 }
 
+destroy_network_queue :: proc(network_queue: ^Network_Queue) {
+	for elem in queue.pop_front_safe(network_queue) {
+		delete(elem)
+	}
+
+	queue.destroy(network_queue)
+}
+
 // TODO(Thomas): Error handling
-send_stream :: proc(packet_stream: ^Packet_Stream) {
+send_stream :: proc(
+	packet_stream: ^Packet_Stream,
+	network_queue: ^Network_Queue,
+	allocator := context.allocator,
+) {
 	for i in 0 ..< packet_stream.packet_queue.current_idx {
 		// 1. Serialize the packet
 		assert(
@@ -85,9 +121,63 @@ send_stream :: proc(packet_stream: ^Packet_Stream) {
 			)
 
 			// 4. Write all the fragments into Network_Queue
+			for fragment in fragments {
+				assert(
+					proto.serialize_fragment_packet(
+						&packet_stream.fragment_writer,
+						fragment,
+					),
+				)
+
+				assert(proto.flush_bits(&packet_stream.fragment_writer))
+
+				fragment_bytes := proto.convert_word_slice_to_byte_slice(
+					packet_stream.packet_writer.buffer[0:packet_stream.fragment_writer.word_index],
+				)
+
+				fragment_bytes_len := len(fragment_bytes)
+
+				network_fragment_bytes := make(
+					[]u8,
+					fragment_bytes_len,
+					allocator,
+				)
+
+				mem.copy(
+					&network_fragment_bytes[0],
+					&fragment_bytes[0],
+					fragment_bytes_len,
+				)
+
+				// memcopy the bytes from the writer
+				ok, err := queue.push_back(
+					network_queue,
+					network_fragment_bytes,
+				)
+				assert(ok)
+				assert(err == nil)
+
+				proto.reset_writer(&packet_stream.fragment_writer)
+			}
 		} else {
 			// If not just write the packet bytes directly into the Network_Queue
 		}
+	}
+}
+
+// TODO(Thomas): Can't know which Packet Type this is before reading PacketHeader
+// Just going to assume its a fragment for now, but when we start to support multiple
+// packet types we need to do that.
+receive_stream :: proc(
+	packet_read_stream: ^Packet_Read_Stream,
+	network_queue: ^Network_Queue,
+) {
+	for byte_slice in queue.pop_front_safe(network_queue) {
+		defer delete(byte_slice)
+
+		assert(len(byte_slice) != 0)
+
+		fmt.println("len(byte_slice)", len(byte_slice))
 	}
 }
 
@@ -141,13 +231,22 @@ main :: proc() {
 	defer log.destroy_console_logger(logger)
 
 
-	packet_stream := create_packet_stream()
-	defer destroy_packet_stream(&packet_stream)
+	network_queue := Network_Queue{}
+	defer destroy_network_queue(&network_queue)
+	queue.init(&network_queue, MAX_OUTGOING_PACKETS)
+
+	send_packet_stream := create_packet_stream()
+	defer destroy_packet_stream(&send_packet_stream)
 
 	for i in 0 ..< MAX_OUTGOING_PACKETS {
 		test_packet := proto.random_test_packet()
-		assert(enqueue_packet(packet_stream.packet_queue, test_packet))
+		assert(enqueue_packet(send_packet_stream.packet_queue, test_packet))
 	}
 
-	send_stream(&packet_stream)
+	send_stream(&send_packet_stream, &network_queue)
+
+	receive_packet_stream := create_packet_read_stream()
+	defer destroy_packet_read_stream(&receive_packet_stream)
+
+	receive_stream(&receive_packet_stream, &network_queue)
 }
