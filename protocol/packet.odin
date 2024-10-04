@@ -236,7 +236,11 @@ process_fragment :: proc(
 	return true
 }
 
-process_packet :: proc(sequence_buffer: ^Sequence_Buffer, data: []u8) -> bool {
+process_packet :: proc(
+	sequence_buffer: ^Sequence_Buffer,
+	data: []u8,
+	allocator := context.temp_allocator,
+) -> bool {
 	// TODO(Thomas): Remove assert in favour of returning false when confident
 	assert(len(data) > 0)
 	if (len(data) <= 0) {
@@ -265,7 +269,7 @@ process_packet :: proc(sequence_buffer: ^Sequence_Buffer, data: []u8) -> bool {
 	// Packet crc32 to the one we've calculated here
 
 	if fragment_packet.packet_type == i32(Packet_Type.Fragment) {
-		if !process_fragment(sequence_buffer, fragment_packet) {
+		if !process_fragment(sequence_buffer, fragment_packet, allocator) {
 			return false
 		}
 	} else {
