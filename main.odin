@@ -1,5 +1,6 @@
 package main
 
+import "base:runtime"
 import queue "core:container/queue"
 import "core:fmt"
 import "core:log"
@@ -7,7 +8,7 @@ import "core:mem"
 
 import proto "protocol"
 
-MAX_OUTGOING_PACKETS :: 256
+MAX_OUTGOING_PACKETS :: 16
 
 Packet_Queue :: struct {
 	current_idx: u32,
@@ -38,6 +39,7 @@ Packet_Read_Stream :: struct {
 	packet_reader:   proto.Bit_Reader,
 	fragment_reader: proto.Bit_Reader,
 	packet_queue:    ^Packet_Queue,
+	sequence_buffer: ^proto.Sequence_Buffer,
 }
 
 create_packet_read_stream :: proc(
@@ -50,17 +52,21 @@ create_packet_read_stream :: proc(
 	fragment_reader := proto.create_reader(fragment_buffer)
 
 	packet_queue := new(Packet_Queue, allocator)
+	sequence_buffer := new(proto.Sequence_Buffer, allocator)
+	proto.init_sequence_buffer(sequence_buffer)
 
-	return Packet_Read_Stream{packet_reader, fragment_reader, packet_queue}
+	return Packet_Read_Stream {
+		packet_reader,
+		fragment_reader,
+		packet_queue,
+		sequence_buffer,
+	}
 }
 
-destroy_packet_read_stream :: proc(packet_read_stream: ^Packet_Read_Stream) {
-	delete(packet_read_stream.packet_reader.buffer)
-	delete(packet_read_stream.fragment_reader.buffer)
-	free(packet_read_stream.packet_queue)
+Network_Queue :: struct {
+	data_queue: queue.Queue([]u8),
+	allocator:  runtime.Allocator,
 }
-
-Network_Queue :: queue.Queue([]u8)
 
 create_packet_stream :: proc(allocator := context.allocator) -> Packet_Stream {
 	packet_buffer := make([]u32, 1_000_000, allocator)
@@ -74,19 +80,6 @@ create_packet_stream :: proc(allocator := context.allocator) -> Packet_Stream {
 	return Packet_Stream{packet_writer, fragment_writer, packet_queue}
 }
 
-destroy_packet_stream :: proc(packet_stream: ^Packet_Stream) {
-	delete(packet_stream.packet_writer.buffer)
-	delete(packet_stream.fragment_writer.buffer)
-	free(packet_stream.packet_queue)
-}
-
-destroy_network_queue :: proc(network_queue: ^Network_Queue) {
-	for elem in queue.pop_front_safe(network_queue) {
-		delete(elem)
-	}
-
-	queue.destroy(network_queue)
-}
 
 // TODO(Thomas): Error handling
 send_stream :: proc(
@@ -151,7 +144,7 @@ send_stream :: proc(
 
 				// memcopy the bytes from the writer
 				ok, err := queue.push_back(
-					network_queue,
+					&network_queue.data_queue,
 					network_fragment_bytes,
 				)
 				assert(ok)
@@ -171,14 +164,22 @@ send_stream :: proc(
 receive_stream :: proc(
 	packet_read_stream: ^Packet_Read_Stream,
 	network_queue: ^Network_Queue,
+	allocator := context.allocator,
 ) {
-	for byte_slice in queue.pop_front_safe(network_queue) {
-		defer delete(byte_slice)
-
+	for byte_slice in queue.pop_front_safe(&network_queue.data_queue) {
 		assert(len(byte_slice) != 0)
 
-		fmt.println("len(byte_slice)", len(byte_slice))
+		// Continue here, this triggers assert
+		//assert(
+		//	proto.process_packet(
+		//		packet_read_stream.sequence_buffer,
+		//		byte_slice,
+		//		allocator,
+		//	),
+		//)
+
 	}
+	free_all(network_queue.allocator)
 }
 
 serialize_packet :: proc(
@@ -230,23 +231,47 @@ main :: proc() {
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
+	send_memory := make([]u8, 10_000_000)
+	defer delete(send_memory)
+	send_arena := mem.Arena{}
+	mem.arena_init(&send_arena, send_memory)
+	send_arena_allocator := mem.arena_allocator(&send_arena)
+
+	recv_memory := make([]u8, 10_000_000)
+	defer delete(recv_memory)
+	recv_arena := mem.Arena{}
+	mem.arena_init(&recv_arena, recv_memory)
+	recv_arena_allocator := mem.arena_allocator(&recv_arena)
+
+	network_memory := make([]u8, 10_000_000)
+	defer delete(network_memory)
+	network_arena := mem.Arena{}
+	mem.arena_init(&network_arena, network_memory)
+	network_arena_allocator := mem.arena_allocator(&network_arena)
 
 	network_queue := Network_Queue{}
-	defer destroy_network_queue(&network_queue)
-	queue.init(&network_queue, MAX_OUTGOING_PACKETS)
 
-	send_packet_stream := create_packet_stream()
-	defer destroy_packet_stream(&send_packet_stream)
+	err := queue.init(
+		&network_queue.data_queue,
+		MAX_OUTGOING_PACKETS,
+		network_arena_allocator,
+	)
+	assert(err == nil)
+
+	send_packet_stream := create_packet_stream(send_arena_allocator)
 
 	for i in 0 ..< MAX_OUTGOING_PACKETS {
 		test_packet := proto.random_test_packet()
 		assert(enqueue_packet(send_packet_stream.packet_queue, test_packet))
 	}
 
-	send_stream(&send_packet_stream, &network_queue)
+	send_stream(&send_packet_stream, &network_queue, send_arena_allocator)
 
-	receive_packet_stream := create_packet_read_stream()
-	defer destroy_packet_read_stream(&receive_packet_stream)
+	receive_packet_stream := create_packet_read_stream(send_arena_allocator)
 
-	receive_stream(&receive_packet_stream, &network_queue)
+	receive_stream(
+		&receive_packet_stream,
+		&network_queue,
+		recv_arena_allocator,
+	)
 }
