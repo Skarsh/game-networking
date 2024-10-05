@@ -132,7 +132,7 @@ send_stream :: proc(
 				network_fragment_bytes := make(
 					[]u8,
 					fragment_bytes_len,
-					allocator,
+					network_queue.allocator,
 				)
 
 				mem.copy(
@@ -146,6 +146,7 @@ send_stream :: proc(
 					&network_queue.data_queue,
 					network_fragment_bytes,
 				)
+
 				assert(ok)
 				assert(err == nil)
 
@@ -181,6 +182,31 @@ receive_stream :: proc(
 		)
 
 	}
+
+	packet_data, ok := proto.receive_packet_fragments(
+		packet_read_stream.sequence_buffer,
+		0,
+		allocator,
+	)
+
+	assert(ok)
+	packet_data_len := len(packet_data)
+	assert(packet_data_len == size_of(u32) * 2048)
+
+	mem.copy(
+		&packet_read_stream.packet_reader.buffer[0],
+		&(packet_data)[0],
+		packet_data_len,
+	)
+
+	des_test_packet_b, des_test_packet_b_ok := proto.deserialize_test_packet_b(
+		&packet_read_stream.packet_reader,
+	)
+
+	assert(des_test_packet_b_ok)
+
+	assert(enqueue_packet(packet_read_stream.packet_queue, des_test_packet_b))
+
 	free_all(network_queue.allocator)
 }
 
@@ -251,7 +277,9 @@ main :: proc() {
 	mem.arena_init(&network_arena, network_memory)
 	network_arena_allocator := mem.arena_allocator(&network_arena)
 
-	network_queue := Network_Queue{}
+	network_queue := Network_Queue {
+		allocator = network_arena_allocator,
+	}
 
 	err := queue.init(
 		&network_queue.data_queue,
@@ -262,18 +290,25 @@ main :: proc() {
 
 	send_packet_stream := create_packet_stream(send_arena_allocator)
 
-	for i in 0 ..< MAX_OUTGOING_PACKETS {
-		test_packet := proto.random_test_packet_b()
-		assert(enqueue_packet(send_packet_stream.packet_queue, test_packet))
-	}
+	//for i in 0 ..< MAX_OUTGOING_PACKETS {
+	//	test_packet := proto.random_test_packet_b()
+	//	assert(enqueue_packet(send_packet_stream.packet_queue, test_packet))
+	//}
+
+	test_packet := proto.random_test_packet_b()
+	assert(enqueue_packet(send_packet_stream.packet_queue, test_packet))
 
 	send_stream(&send_packet_stream, &network_queue, send_arena_allocator)
 
-	receive_packet_stream := create_packet_read_stream(send_arena_allocator)
+	receive_packet_stream := create_packet_read_stream(recv_arena_allocator)
 
 	receive_stream(
 		&receive_packet_stream,
 		&network_queue,
 		recv_arena_allocator,
 	)
+
+	received_packet := receive_packet_stream.packet_queue.packets[0]
+
+	assert(test_packet == received_packet)
 }
