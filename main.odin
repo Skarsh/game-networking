@@ -26,7 +26,7 @@ enqueue_packet :: proc(packet_queue: ^Packet_Queue, packet: Packet) -> bool {
 
 // Add more packet types, this is high-level packets??
 Packet :: union {
-	proto.Test_Packet,
+	proto.Test_Packet_B,
 }
 
 Packet_Stream :: struct {
@@ -101,7 +101,6 @@ send_stream :: proc(
 			packet_stream.packet_writer.buffer[0:packet_stream.packet_writer.word_index],
 		)
 
-		proto.reset_writer(&packet_stream.packet_writer)
 
 		// 3. Check if the length of the packet is larger than MTU, meaning that we need to split it
 		// into fragments
@@ -125,7 +124,7 @@ send_stream :: proc(
 				assert(proto.flush_bits(&packet_stream.fragment_writer))
 
 				fragment_bytes := proto.convert_word_slice_to_byte_slice(
-					packet_stream.packet_writer.buffer[0:packet_stream.fragment_writer.word_index],
+					packet_stream.fragment_writer.buffer[0:packet_stream.fragment_writer.word_index],
 				)
 
 				fragment_bytes_len := len(fragment_bytes)
@@ -152,6 +151,9 @@ send_stream :: proc(
 
 				proto.reset_writer(&packet_stream.fragment_writer)
 			}
+
+			proto.reset_writer(&packet_stream.packet_writer)
+
 		} else {
 			// If not just write the packet bytes directly into the Network_Queue
 		}
@@ -170,13 +172,13 @@ receive_stream :: proc(
 		assert(len(byte_slice) != 0)
 
 		// Continue here, this triggers assert
-		//assert(
-		//	proto.process_packet(
-		//		packet_read_stream.sequence_buffer,
-		//		byte_slice,
-		//		allocator,
-		//	),
-		//)
+		assert(
+			proto.process_packet(
+				packet_read_stream.sequence_buffer,
+				byte_slice,
+				allocator,
+			),
+		)
 
 	}
 	free_all(network_queue.allocator)
@@ -187,8 +189,8 @@ serialize_packet :: proc(
 	packet: Packet,
 ) -> bool {
 	switch p in packet {
-	case proto.Test_Packet:
-		if !proto.serialize_test_packet(bit_writer, p) {
+	case proto.Test_Packet_B:
+		if !proto.serialize_test_packet_b(bit_writer, p) {
 			return false
 		}
 
@@ -261,7 +263,7 @@ main :: proc() {
 	send_packet_stream := create_packet_stream(send_arena_allocator)
 
 	for i in 0 ..< MAX_OUTGOING_PACKETS {
-		test_packet := proto.random_test_packet()
+		test_packet := proto.random_test_packet_b()
 		assert(enqueue_packet(send_packet_stream.packet_queue, test_packet))
 	}
 

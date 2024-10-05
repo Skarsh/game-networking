@@ -19,18 +19,85 @@ MAX_PACKET_SIZE :: MAX_FRAGMENTS_PER_PACKET * MAX_FRAGMENT_SIZE
 // requires this to have more than one variant
 Packet_Type :: enum {
 	Fragment,
-	Test_Packet,
+	Test_Packet_A,
+	Test_Packet_B,
+}
+
+Test_Packet_A :: struct {
+	a: i32,
+	b: i32,
+	c: i32,
+}
+
+serialize_test_packet_a :: proc(
+	bit_writer: ^Bit_Writer,
+	test_packet: Test_Packet_A,
+) -> bool {
+	if !serialize_integer(
+		bit_writer,
+		test_packet.a,
+		math.min(i32),
+		math.max(i32),
+	) {
+		return false
+	}
+
+	if !serialize_integer(
+		bit_writer,
+		test_packet.b,
+		math.min(i32),
+		math.max(i32),
+	) {
+		return false
+	}
+
+	if !serialize_integer(
+		bit_writer,
+		test_packet.c,
+		math.min(i32),
+		math.max(i32),
+	) {
+		return false
+	}
+
+	return true
+}
+
+deserialize_test_packet_a :: proc(
+	bit_reader: ^Bit_Reader,
+) -> (
+	Test_Packet_A,
+	bool,
+) {
+	test_packet := Test_Packet_A{}
+
+	a, a_ok := deserialize_integer(bit_reader, math.min(i32), math.max(i32))
+	if !a_ok {
+		return Test_Packet_A{}, false
+	}
+
+	b, b_ok := deserialize_integer(bit_reader, math.min(i32), math.max(i32))
+	if !b_ok {
+		return Test_Packet_A{}, false
+	}
+
+	c, c_ok := deserialize_integer(bit_reader, math.min(i32), math.max(i32))
+	if !c_ok {
+		return Test_Packet_A{}, false
+	}
+
+	return Test_Packet_A{a, b, c}, true
 }
 
 // Packet that should be larger than the MTU, so that we have to split it up into 
 // mutlple Fragment_Packet, but smaller than the MAX_PACKET_SIZE.
-Test_Packet :: struct {
+Test_Packet_B :: struct {
 	items: [2048]i32,
 }
 
-serialize_test_packet :: proc(
+serialize_test_packet_b :: proc(
 	bit_writer: ^Bit_Writer,
-	test_packet: Test_Packet,
+	test_packet: Test_Packet_B,
 ) -> bool {
 	for item in test_packet.items {
 		if !serialize_integer(bit_writer, item, math.min(i32), math.max(i32)) {
@@ -41,13 +108,13 @@ serialize_test_packet :: proc(
 	return true
 }
 
-desserialize_test_packet :: proc(
+desserialize_test_packet_b :: proc(
 	bit_reader: ^Bit_Reader,
 ) -> (
-	Test_Packet,
+	Test_Packet_B,
 	bool,
 ) {
-	test_packet := Test_Packet{}
+	test_packet := Test_Packet_B{}
 	for i in 0 ..< len(test_packet.items) {
 		item, ok := deserialize_integer(
 			bit_reader,
@@ -55,7 +122,7 @@ desserialize_test_packet :: proc(
 			math.max(i32),
 		)
 		if !ok {
-			return Test_Packet{}, false
+			return Test_Packet_B{}, false
 		}
 		test_packet.items[i] = item
 	}
@@ -63,21 +130,25 @@ desserialize_test_packet :: proc(
 	return test_packet, true
 }
 
-random_test_packet :: proc() -> Test_Packet {
-	test_packet := Test_Packet{}
+random_test_packet_b :: proc() -> Test_Packet_B {
+	test_packet := Test_Packet_B{}
 	for i in 0 ..< len(test_packet.items) {
 		test_packet.items[i] = rand.int31()
 	}
 	return test_packet
 }
 
+Packet_Header :: struct {
+	crc32:       u32,
+	packet_type: i32,
+	sequence:    u16,
+}
+
 FRAGMENT_PACKET_HEADER_SIZE :: offset_of(Fragment_Packet, data)
 
 Fragment_Packet :: struct {
 	fragment_size: u32,
-	crc32:         u32,
-	packet_type:   i32,
-	sequence:      u16,
+	packet_header: Packet_Header,
 	fragment_id:   u8,
 	num_fragments: u8,
 	// Pad zero bits to nearest byte index
@@ -182,7 +253,7 @@ process_fragment :: proc(
 
 	assert(len(fragment_packet.data) > 0)
 	assert(len(fragment_packet.data) <= MAX_FRAGMENT_SIZE)
-	index := get_sequence_index(fragment_packet.sequence)
+	index := get_sequence_index(fragment_packet.packet_header.sequence)
 
 	if sequence_buffer.sequence[index] == ENTRY_SENTINEL_VALUE {
 
@@ -209,8 +280,12 @@ process_fragment :: proc(
 		sequence_buffer.entries[index].received_fragments += 1
 
 		// TODO(Thomas): Is this correct??
-		sequence_buffer.sequence[index] = u32(fragment_packet.sequence)
-		sequence_buffer.current_sequence = u32(fragment_packet.sequence)
+		sequence_buffer.sequence[index] = u32(
+			fragment_packet.packet_header.sequence,
+		)
+		sequence_buffer.current_sequence = u32(
+			fragment_packet.packet_header.sequence,
+		)
 
 	} else {
 
@@ -229,8 +304,12 @@ process_fragment :: proc(
 		)
 
 		// TODO(Thomas): Is this correct??
-		sequence_buffer.sequence[index] = u32(fragment_packet.sequence)
-		sequence_buffer.current_sequence = u32(fragment_packet.sequence)
+		sequence_buffer.sequence[index] = u32(
+			fragment_packet.packet_header.sequence,
+		)
+		sequence_buffer.current_sequence = u32(
+			fragment_packet.packet_header.sequence,
+		)
 	}
 
 	return true
@@ -268,7 +347,7 @@ process_packet :: proc(
 	// TODO(Thomas): Deal with crc32 calculation properly and compare the 
 	// Packet crc32 to the one we've calculated here
 
-	if fragment_packet.packet_type == i32(Packet_Type.Fragment) {
+	if fragment_packet.packet_header.packet_type == i32(Packet_Type.Fragment) {
 		if !process_fragment(sequence_buffer, fragment_packet, allocator) {
 			return false
 		}
@@ -322,14 +401,41 @@ split_packet_into_fragments :: proc(
 		)
 
 		fragment.fragment_size = u32(fragment_size)
-		fragment.crc32 = calculate_crc32(fragment.data)
-		fragment.sequence = sequence
-		fragment.packet_type = i32(Packet_Type.Fragment)
+		fragment.packet_header = Packet_Header {
+			crc32       = calculate_crc32(fragment.data),
+			packet_type = i32(Packet_Type.Fragment),
+			sequence    = sequence,
+		}
 		fragment.fragment_id = u8(i)
 		fragment.num_fragments = u8(num_fragments)
 	}
 
 	return fragments
+}
+
+serialize_packet_header :: proc(
+	bit_writer: ^Bit_Writer,
+	packet_header: Packet_Header,
+) -> bool {
+	if !write_bits(bit_writer, packet_header.crc32, 32) {
+		return false
+	}
+
+	// NOTE(Thomas): This len(Packet_Type) - 1 trick only works if 
+	// there is more than one variant in the Packet_Type enum
+	if !write_bits(
+		bit_writer,
+		u32(packet_header.packet_type),
+		len(Packet_Type) - 1,
+	) {
+		return false
+	}
+
+	if !write_bits(bit_writer, u32(packet_header.sequence), 32) {
+		return false
+	}
+
+	return true
 }
 
 serialize_fragment_packet :: proc(
@@ -341,21 +447,7 @@ serialize_fragment_packet :: proc(
 		return false
 	}
 
-	if !write_bits(bit_writer, fragment_packet.crc32, 32) {
-		return false
-	}
-
-	// NOTE(Thomas): This len(Packet_Type) - 1 trick only works if 
-	// there is more than one variant in the Packet_Type enum
-	if !write_bits(
-		bit_writer,
-		u32(fragment_packet.packet_type),
-		len(Packet_Type) - 1,
-	) {
-		return false
-	}
-
-	if !write_bits(bit_writer, u32(fragment_packet.sequence), 32) {
+	if !serialize_packet_header(bit_writer, fragment_packet.packet_header) {
 		return false
 	}
 
@@ -398,6 +490,31 @@ serialize_fragment_packets :: proc(
 	return true
 }
 
+deserialize_packet_header :: proc(
+	bit_reader: ^Bit_Reader,
+) -> (
+	Packet_Header,
+	bool,
+) {
+
+	crc32, crc32_ok := read_bits(bit_reader, 32)
+	if !crc32_ok {
+		return Packet_Header{}, false
+	}
+
+	packet_type, packet_type_ok := read_bits(bit_reader, len(Packet_Type) - 1)
+	if !packet_type_ok {
+		return Packet_Header{}, false
+	}
+
+	sequence, seq_ok := read_bits(bit_reader, 32)
+	if !seq_ok {
+		return Packet_Header{}, false
+	}
+
+	return Packet_Header{crc32, i32(packet_type), u16(sequence)}, true
+}
+
 deserialize_fragment_packet :: proc(
 	bit_reader: ^Bit_Reader,
 	allocator := context.temp_allocator,
@@ -415,25 +532,10 @@ deserialize_fragment_packet :: proc(
 		return Fragment_Packet{}, false
 	}
 
-	crc32, crc32_ok := read_bits(bit_reader, 32)
-	if !crc32_ok {
+	packet_header, packet_header_ok := deserialize_packet_header(bit_reader)
+	if !packet_header_ok {
 		return Fragment_Packet{}, false
 	}
-
-	packet_type_int, packet_type_ok := read_bits(
-		bit_reader,
-		len(Packet_Type) - 1,
-	)
-	if !packet_type_ok {
-		return Fragment_Packet{}, false
-	}
-	packet_type := Packet_Type(packet_type_int)
-
-	sequence, seq_ok := read_bits(bit_reader, 32)
-	if !seq_ok {
-		return Fragment_Packet{}, false
-	}
-
 
 	fragment_id, fragment_id_ok := read_bits(bit_reader, 8)
 	if !fragment_id_ok {
@@ -458,9 +560,7 @@ deserialize_fragment_packet :: proc(
 
 	return Fragment_Packet {
 			fragment_size,
-			crc32,
-			i32(packet_type),
-			u16(sequence),
+			packet_header,
 			u8(fragment_id),
 			u8(num_fragments),
 			data,
@@ -468,22 +568,19 @@ deserialize_fragment_packet :: proc(
 		true
 }
 
+
 compare_fragment_packet :: proc(
 	packet_a: Fragment_Packet,
 	packet_b: Fragment_Packet,
 ) -> bool {
 	equal_frag_size := packet_a.fragment_size == packet_b.fragment_size
-	equal_crc32 := packet_a.crc32 == packet_b.crc32
-	equal_seq := packet_a.sequence == packet_b.sequence
-	equal_packet_type := packet_a.packet_type == packet_b.packet_type
+	equal_packet_header := packet_a.packet_header == packet_b.packet_header
 	equal_frag_id := packet_a.fragment_id == packet_b.fragment_id
 	equal_num_fragments := packet_a.num_fragments == packet_b.num_fragments
 	equal_data := bytes.compare(packet_a.data, packet_b.data) == 0
 	return(
 		equal_frag_size &&
-		equal_crc32 &&
-		equal_seq &&
-		equal_packet_type &&
+		equal_packet_header &&
 		equal_frag_id &&
 		equal_num_fragments &&
 		equal_data \
@@ -497,11 +594,14 @@ test_compare_fragment_packet :: proc(t: ^testing.T) {
 		fragment_data: [MAX_FRAGMENT_SIZE]u8
 		fragment_packet := Fragment_Packet {
 			fragment_size = MAX_FRAGMENT_SIZE,
-			crc32         = 72,
-			sequence      = 42,
-			fragment_id   = 12,
+			packet_header = Packet_Header {
+				crc32 = 72,
+				sequence = 42,
+				packet_type = i32(Packet_Type.Fragment),
+			},
+			fragment_id = 12,
 			num_fragments = 14,
-			data          = fragment_data[:],
+			data = fragment_data[:],
 		}
 
 		equal_packets := compare_fragment_packet(
@@ -523,19 +623,24 @@ test_compare_fragment_packet :: proc(t: ^testing.T) {
 		fragment_data: [MAX_FRAGMENT_SIZE]u8
 		fragment_packet_a := Fragment_Packet {
 			fragment_size = MAX_FRAGMENT_SIZE,
-			crc32         = 72,
-			sequence      = 42,
-			fragment_id   = 12,
+			packet_header = Packet_Header {
+				crc32 = 72,
+				sequence = 42,
+				packet_type = i32(Packet_Type.Fragment),
+			},
+			fragment_id = 12,
 			num_fragments = 14,
-			data          = fragment_data[:],
+			data = fragment_data[:],
 		}
 		fragment_packet_b := Fragment_Packet {
 			fragment_size = MAX_FRAGMENT_SIZE,
-			crc32         = 73,
-			sequence      = 42,
-			fragment_id   = 12,
+			packet_header = Packet_Header {
+				crc32 = 72,
+				sequence = 42,
+				packet_type = i32(Packet_Type.Fragment),
+			},
 			num_fragments = 14,
-			data          = fragment_data[:],
+			data = fragment_data[:],
 		}
 
 		equal_packets := compare_fragment_packet(
@@ -563,12 +668,14 @@ test_serialize_deserialize_fragment_packet_max_size :: proc(t: ^testing.T) {
 	fragment_data: [MAX_FRAGMENT_SIZE]u8
 	fragment_packet := Fragment_Packet {
 		fragment_size = MAX_FRAGMENT_SIZE,
-		crc32         = 72,
-		sequence      = 42,
-		packet_type   = i32(Packet_Type.Fragment),
-		fragment_id   = 12,
+		packet_header = Packet_Header {
+			crc32 = 72,
+			sequence = 42,
+			packet_type = i32(Packet_Type.Fragment),
+		},
+		fragment_id = 12,
 		num_fragments = 14,
-		data          = fragment_data[:],
+		data = fragment_data[:],
 	}
 	serialize_ok := serialize_fragment_packet(&writer, fragment_packet)
 	testing.expectf(
@@ -605,12 +712,14 @@ test_serialize_deserialize_fragment_packet_medium_size :: proc(t: ^testing.T) {
 	fragment_data: [MAX_FRAGMENT_SIZE / 2]u8
 	fragment_packet := Fragment_Packet {
 			fragment_size = MAX_FRAGMENT_SIZE / 2,
-			crc32         = 72,
-			sequence      = 42,
-			packet_type   = i32(Packet_Type.Fragment),
-			fragment_id   = 12,
+			packet_header = Packet_Header {
+				crc32 = 72,
+				packet_type = i32(Packet_Type.Fragment),
+				sequence = 42,
+			},
+			fragment_id = 12,
 			num_fragments = 14,
-			data          = fragment_data[:],
+			data = fragment_data[:],
 		}
 	serialize_ok := serialize_fragment_packet(&writer, fragment_packet)
 	testing.expectf(
@@ -660,8 +769,8 @@ test_serialize_deserialize_test_packet :: proc(t: ^testing.T) {
 	writer := create_writer(buffer)
 	reader := create_reader(buffer)
 
-	test_packet := random_test_packet()
-	serialize_ok := serialize_test_packet(&writer, test_packet)
+	test_packet := random_test_packet_b()
+	serialize_ok := serialize_test_packet_b(&writer, test_packet)
 
 	testing.expectf(
 		t,
@@ -669,7 +778,7 @@ test_serialize_deserialize_test_packet :: proc(t: ^testing.T) {
 		fmt.tprintf("Serializing test packet should be successful"),
 	)
 
-	deserialized_test_packet, deserialize_ok := desserialize_test_packet(
+	deserialized_test_packet, deserialize_ok := desserialize_test_packet_b(
 		&reader,
 	)
 	testing.expectf(
@@ -791,14 +900,14 @@ test_split_byte_buffer_multiple_fragment_packets :: proc(t: ^testing.T) {
 test_serialize_split_and_reassemble_and_deserialize_test_packet :: proc(
 	t: ^testing.T,
 ) {
-	test_packet := random_test_packet()
+	test_packet := random_test_packet_b()
 	buffer := make([]u32, 2048)
 	defer delete(buffer)
 	writer := create_writer(buffer)
 
 	testing.expectf(
 		t,
-		serialize_test_packet(&writer, test_packet),
+		serialize_test_packet_b(&writer, test_packet),
 		"serializing test packet should be successful",
 	)
 
@@ -831,7 +940,7 @@ test_serialize_split_and_reassemble_and_deserialize_test_packet :: proc(
 		fragment_data_buffer,
 	)
 	reader := create_reader(fragment_data_buffer_words)
-	des_test_packet, ok := desserialize_test_packet(&reader)
+	des_test_packet, ok := desserialize_test_packet_b(&reader)
 	testing.expectf(t, ok, "deserializing test packet should be successful")
 
 	testing.expect_value(t, test_packet, des_test_packet)
@@ -852,11 +961,14 @@ test_process_fragment :: proc(t: ^testing.T) {
 	}
 
 	fragment_packet := Fragment_Packet {
-		sequence      = 0,
-		packet_type   = i32(Packet_Type.Fragment),
-		fragment_id   = 0,
+		packet_header = Packet_Header {
+			crc32 = 0,
+			sequence = 0,
+			packet_type = i32(Packet_Type.Fragment),
+		},
+		fragment_id = 0,
 		fragment_size = MAX_FRAGMENT_SIZE,
-		data          = fragment_data,
+		data = fragment_data,
 	}
 
 	testing.expectf(
@@ -918,7 +1030,7 @@ test_process_packet :: proc(t: ^testing.T) {
 	init_sequence_buffer(sequence_buffer)
 	sequence: u32 = 0
 
-	test_packet := random_test_packet()
+	test_packet := random_test_packet_b()
 
 	writer_buffer := make([]u32, 2048)
 	defer delete(writer_buffer)
@@ -926,7 +1038,7 @@ test_process_packet :: proc(t: ^testing.T) {
 
 	testing.expectf(
 		t,
-		serialize_test_packet(&writer, test_packet),
+		serialize_test_packet_b(&writer, test_packet),
 		"serialize_test_packet should be successful",
 	)
 
@@ -985,7 +1097,7 @@ test_process_packet :: proc(t: ^testing.T) {
 		convert_byte_slice_to_word_slice(reassembled_test_packet_data),
 	)
 
-	des_test_packet, des_test_packet_ok := desserialize_test_packet(
+	des_test_packet, des_test_packet_ok := desserialize_test_packet_b(
 		&reassembled_test_packet_reader,
 	)
 
@@ -1030,7 +1142,7 @@ test_receive_packet_fragments :: proc(t: ^testing.T) {
 	init_sequence_buffer(sequence_buffer)
 
 	sequence: u32 = 0
-	test_packet := random_test_packet()
+	test_packet := random_test_packet_b()
 
 	writer_buffer := make([]u32, 2048)
 	defer delete(writer_buffer)
@@ -1038,7 +1150,7 @@ test_receive_packet_fragments :: proc(t: ^testing.T) {
 
 	testing.expectf(
 		t,
-		serialize_test_packet(&writer, test_packet),
+		serialize_test_packet_b(&writer, test_packet),
 		"serialize_test_packet should be successful",
 	)
 
@@ -1099,7 +1211,7 @@ test_receive_packet_fragments :: proc(t: ^testing.T) {
 		convert_byte_slice_to_word_slice(packet_data),
 	)
 
-	des_test_packet, des_test_packet_ok := desserialize_test_packet(
+	des_test_packet, des_test_packet_ok := desserialize_test_packet_b(
 		&test_packet_reader,
 	)
 
