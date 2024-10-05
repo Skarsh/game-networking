@@ -108,7 +108,7 @@ serialize_test_packet_b :: proc(
 	return true
 }
 
-desserialize_test_packet_b :: proc(
+deserialize_test_packet_b :: proc(
 	bit_reader: ^Bit_Reader,
 ) -> (
 	Test_Packet_B,
@@ -778,7 +778,7 @@ test_serialize_deserialize_test_packet :: proc(t: ^testing.T) {
 		fmt.tprintf("Serializing test packet should be successful"),
 	)
 
-	deserialized_test_packet, deserialize_ok := desserialize_test_packet_b(
+	deserialized_test_packet, deserialize_ok := deserialize_test_packet_b(
 		&reader,
 	)
 	testing.expectf(
@@ -940,7 +940,7 @@ test_serialize_split_and_reassemble_and_deserialize_test_packet :: proc(
 		fragment_data_buffer,
 	)
 	reader := create_reader(fragment_data_buffer_words)
-	des_test_packet, ok := desserialize_test_packet_b(&reader)
+	des_test_packet, ok := deserialize_test_packet_b(&reader)
 	testing.expectf(t, ok, "deserializing test packet should be successful")
 
 	testing.expect_value(t, test_packet, des_test_packet)
@@ -1097,7 +1097,7 @@ test_process_packet :: proc(t: ^testing.T) {
 		convert_byte_slice_to_word_slice(reassembled_test_packet_data),
 	)
 
-	des_test_packet, des_test_packet_ok := desserialize_test_packet_b(
+	des_test_packet, des_test_packet_ok := deserialize_test_packet_b(
 		&reassembled_test_packet_reader,
 	)
 
@@ -1211,7 +1211,7 @@ test_receive_packet_fragments :: proc(t: ^testing.T) {
 		convert_byte_slice_to_word_slice(packet_data),
 	)
 
-	des_test_packet, des_test_packet_ok := desserialize_test_packet_b(
+	des_test_packet, des_test_packet_ok := deserialize_test_packet_b(
 		&test_packet_reader,
 	)
 
