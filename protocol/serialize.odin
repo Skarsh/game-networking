@@ -96,6 +96,22 @@ deserialize_integer :: proc(
 }
 
 @(require_results)
+serialize_bool :: proc(bit_writer: ^Bit_Writer, val: bool) -> bool {
+	write_bits(bit_writer, u32(val), 1) or_return
+	return true
+}
+
+@(require_results)
+deserialize_bool :: proc(bit_reader: ^Bit_Reader) -> (bool, bool) {
+	val, success := read_bits(bit_reader, 1)
+	if !success {
+		return false, false
+	}
+
+	return bool(val), true
+}
+
+@(require_results)
 serialize_float :: proc(bit_writer: ^Bit_Writer, value: f32) -> bool {
 	int_value := transmute(u32)value
 	return write_bits(bit_writer, int_value, 32)
@@ -657,6 +673,47 @@ test_serialize_deserialize_edge_cases :: proc(t: ^testing.T) {
 		deserialized_value, success := deserialize_integer(&reader, min, max)
 		testing.expect(t, success)
 		testing.expect_value(t, deserialized_value, value)
+	}
+}
+
+@(test)
+test_serialize_deserialize_bool :: proc(t: ^testing.T) {
+	// True case
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		val := true
+
+		res := serialize_bool(&writer, val)
+		testing.expect(t, res)
+
+		res = flush_bits(&writer)
+		testing.expect(t, res)
+
+		deserialized_val, success := deserialize_bool(&reader)
+		testing.expect(t, success)
+		testing.expect_value(t, deserialized_val, val)
+	}
+
+	// False case
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		val := false
+
+		res := serialize_bool(&writer, val)
+		testing.expect(t, res)
+
+		res = flush_bits(&writer)
+		testing.expect(t, res)
+
+		deserialized_val, success := deserialize_bool(&reader)
+		testing.expect(t, success)
+		testing.expect_value(t, deserialized_val, val)
 	}
 }
 
