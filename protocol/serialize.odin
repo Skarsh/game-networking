@@ -97,8 +97,7 @@ deserialize_integer :: proc(
 
 @(require_results)
 serialize_bool :: proc(bit_writer: ^Bit_Writer, val: bool) -> bool {
-	write_bits(bit_writer, u32(val), 1) or_return
-	return true
+	return write_bits(bit_writer, u32(val), 1)
 }
 
 @(require_results)
@@ -251,13 +250,8 @@ Quaternion :: [4]f32
 
 @(require_results)
 serialize_vector2 :: proc(bit_writer: ^Bit_Writer, value: Vector2) -> bool {
-	if !serialize_float(bit_writer, value[0]) {
-		return false
-	}
-	if !serialize_float(bit_writer, value[1]) {
-		return false
-	}
-
+	serialize_float(bit_writer, value[0]) or_return
+	serialize_float(bit_writer, value[1]) or_return
 	return true
 }
 
@@ -279,15 +273,9 @@ deserialize_vector2 :: proc(bit_reader: ^Bit_Reader) -> (Vector2, bool) {
 
 @(require_results)
 serialize_vector3 :: proc(bit_writer: ^Bit_Writer, value: Vector3) -> bool {
-	if !serialize_float(bit_writer, value[0]) {
-		return false
-	}
-	if !serialize_float(bit_writer, value[1]) {
-		return false
-	}
-	if !serialize_float(bit_writer, value[2]) {
-		return false
-	}
+	serialize_float(bit_writer, value[0]) or_return
+	serialize_float(bit_writer, value[1]) or_return
+	serialize_float(bit_writer, value[2]) or_return
 
 	return true
 }
@@ -320,13 +308,21 @@ serialize_compressed_vector2 :: proc(
 	max: f32,
 	resolution: f32,
 ) -> bool {
-	if !serialize_compressed_float(bit_writer, vec2[0], min, max, resolution) {
-		return false
-	}
+	serialize_compressed_float(
+		bit_writer,
+		vec2[0],
+		min,
+		max,
+		resolution,
+	) or_return
+	serialize_compressed_float(
+		bit_writer,
+		vec2[1],
+		min,
+		max,
+		resolution,
+	) or_return
 
-	if !serialize_compressed_float(bit_writer, vec2[1], min, max, resolution) {
-		return false
-	}
 	return true
 }
 
@@ -434,21 +430,10 @@ serialize_quaternion :: proc(
 	bit_writer: ^Bit_Writer,
 	quat: Quaternion,
 ) -> bool {
-	if !serialize_float(bit_writer, quat[0]) {
-		return false
-	}
-
-	if !serialize_float(bit_writer, quat[1]) {
-		return false
-	}
-
-	if !serialize_float(bit_writer, quat[2]) {
-		return false
-	}
-
-	if !serialize_float(bit_writer, quat[3]) {
-		return false
-	}
+	serialize_float(bit_writer, quat[0]) or_return
+	serialize_float(bit_writer, quat[1]) or_return
+	serialize_float(bit_writer, quat[2]) or_return
+	serialize_float(bit_writer, quat[3]) or_return
 
 	return true
 }
@@ -492,10 +477,9 @@ deserialize_align :: proc(bit_reader: ^Bit_Reader) -> bool {
 
 @(require_results)
 serialize_bytes :: proc(bit_writer: ^Bit_Writer, data: []u8) -> bool {
+	// TODO(Thomas): Swap out assert with if statment
 	assert(len(data) > 0)
-	if !serialize_align(bit_writer) {
-		return false
-	}
+	serialize_align(bit_writer) or_return
 	return write_bytes(bit_writer, data)
 }
 
@@ -507,9 +491,7 @@ deserialize_bytes :: proc(
 ) -> bool {
 	assert(len(data) > 0)
 	assert(bytes > 0)
-	if !deserialize_align(bit_reader) {
-		return false
-	}
+	deserialize_align(bit_reader) or_return
 	return read_bytes(bit_reader, data, bytes)
 }
 
@@ -522,14 +504,8 @@ serialize_string :: proc(bit_writer: ^Bit_Writer, str: string) -> bool {
 	str_length := i32(len(str_bytes))
 	buffer_size := i32(len(bit_writer.buffer))
 	assert(str_length < buffer_size - 1)
-	success := serialize_integer(bit_writer, str_length, 0, buffer_size - 1)
-	if !success {
-		return false
-	}
-	success = serialize_bytes(bit_writer, str_bytes)
-	if !success {
-		return false
-	}
+	serialize_integer(bit_writer, str_length, 0, buffer_size - 1) or_return
+	serialize_bytes(bit_writer, str_bytes) or_return
 
 	return true
 }
