@@ -176,11 +176,7 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	if num_words > 0 {
 		assert(writer.bits_written % 32 == 0)
 		copy_len := int(num_words) * 4
-		mem.copy(
-			&writer.buffer[writer.word_index],
-			&data[head_bytes],
-			copy_len,
-		)
+		mem.copy(&writer.buffer[writer.word_index], &data[head_bytes], copy_len)
 		writer.bits_written += num_words * 32
 		writer.word_index += num_words
 		writer.scratch = 0
@@ -213,10 +209,7 @@ get_align_bits :: proc(bits: u32) -> u32 {
 // TODO(Thomas): Does this belong in a util.odin or similar??
 // Converts a slice of words(u32) to a slice of bytes. This does not allocate.
 convert_word_slice_to_byte_slice :: proc(buffer: []u32) -> []u8 {
-	bytes := transmute([]u8)mem.slice_ptr(
-		raw_data(buffer),
-		len(buffer) * size_of(u32),
-	)
+	bytes := transmute([]u8)mem.slice_ptr(raw_data(buffer), len(buffer) * size_of(u32))
 
 	return bytes
 }
@@ -247,10 +240,7 @@ test_convert_word_slice_to_byte_slice_and_back :: proc(t: ^testing.T) {
 // TODO(Thomas): Does this belong in a util.odin or similar??
 // Converts a slice of bytes to a slice of words(u32). This does not allocate.
 convert_byte_slice_to_word_slice :: proc(buffer: []u8) -> []u32 {
-	words := transmute([]u32)mem.slice_ptr(
-		raw_data(buffer),
-		len(buffer) / size_of(u32),
-	)
+	words := transmute([]u32)mem.slice_ptr(raw_data(buffer), len(buffer) / size_of(u32))
 	return words
 }
 
@@ -335,8 +325,7 @@ read_bits :: proc(reader: ^Bit_Reader, bits: u32) -> (u32, bool) {
 	// Ensure we have enough bits in the scratch
 	if reader.scratch_bits < bits {
 		// Read in a new word if we've exhausted the current one
-		reader.scratch |=
-			u64(reader.buffer[reader.word_index]) << reader.scratch_bits
+		reader.scratch |= u64(reader.buffer[reader.word_index]) << reader.scratch_bits
 		reader.scratch_bits += 32
 		reader.word_index += 1
 	}
@@ -409,11 +398,7 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	copy_len := int(num_words) * 4
 	if num_words > 0 {
 		assert((reader.bits_read % 32) == 0)
-		mem.copy(
-			&data[head_bytes],
-			&reader.buffer[reader.word_index],
-			copy_len,
-		)
+		mem.copy(&data[head_bytes], &reader.buffer[reader.word_index], copy_len)
 		reader.bits_read += num_words * 32
 		reader.word_index += num_words
 		reader.scratch_bits = 0
@@ -452,12 +437,7 @@ get_reader_bytes_read :: proc(bit_reader: Bit_Reader) -> u32 {
 // NOTE: This assumes that the bits passed in are byte aligned,
 // meaning that for x = 8, 16, 24 and 32 then num_bits % x == 0
 calculate_head_bytes :: proc(num_bits: u32) -> u32 {
-	assert(
-		num_bits % 32 == 0 ||
-		num_bits % 32 == 8 ||
-		num_bits % 32 == 16 ||
-		num_bits % 32 == 24,
-	)
+	assert(num_bits % 32 == 0 || num_bits % 32 == 8 || num_bits % 32 == 16 || num_bits % 32 == 24)
 	// This calulates the amount of bytes necessary to reach the next word byte boundary
 	// Step 1: Calculate the remainder of bits past the current word: writer.bits_written % 32
 	// Step 2: Calculate the remainder of bytes past the current word: (writer.bits_written % 32) / 8 
@@ -585,11 +565,7 @@ test_overflow_protection :: proc(t: ^testing.T) {
 	testing.expect(
 		t,
 		!res,
-		fmt.tprintf(
-			"Expected write_bits result to be %v, but was %v",
-			false,
-			res,
-		),
+		fmt.tprintf("Expected write_bits result to be %v, but was %v", false, res),
 	)
 }
 
@@ -1219,11 +1195,7 @@ test_write_bytes :: proc(t: ^testing.T) {
 		writer := create_writer(buffer)
 		data := []u8{0xAA, 0xBB, 0xCC}
 		success := write_bytes(&writer, data)
-		testing.expect(
-			t,
-			success,
-			"Writing small amount of data should succeed",
-		)
+		testing.expect(t, success, "Writing small amount of data should succeed")
 		success = flush_bits(&writer)
 		testing.expect(t, success)
 		testing.expect_value(t, writer.bits_written, 24)
@@ -1248,11 +1220,7 @@ test_write_bytes :: proc(t: ^testing.T) {
 		writer := create_writer(buffer)
 		data := []u8{0xAA, 0xBB, 0xCC, 0xDD, 0xEE}
 		success := write_bytes(&writer, data)
-		testing.expect(
-			t,
-			success,
-			"Writing non-word-aligned data should succeed",
-		)
+		testing.expect(t, success, "Writing non-word-aligned data should succeed")
 		success = flush_bits(&writer)
 		testing.expect(t, success)
 		testing.expect_value(t, writer.bits_written, 40)
@@ -1326,11 +1294,7 @@ test_read_bytes :: proc(t: ^testing.T) {
 		reader := create_reader(buffer)
 		data := []u8{0, 0, 0}
 		success := read_bytes(&reader, data, 3)
-		testing.expect(
-			t,
-			success,
-			"Reading non-word-aligned data should succeed",
-		)
+		testing.expect(t, success, "Reading non-word-aligned data should succeed")
 		testing.expect_value(t, data[0], 0xAA)
 		testing.expect_value(t, data[1], 0xBB)
 		testing.expect_value(t, data[2], 0xCC)
@@ -1344,11 +1308,7 @@ test_read_bytes :: proc(t: ^testing.T) {
 		reader := create_reader(buffer)
 		data: [8]u8
 		success := read_bytes(&reader, data[:], 8)
-		testing.expect(
-			t,
-			success,
-			"Reading non-word-aligned data should succeed",
-		)
+		testing.expect(t, success, "Reading non-word-aligned data should succeed")
 		// First word
 		testing.expect_value(t, data[0], 0xAA)
 		testing.expect_value(t, data[1], 0xBB)
@@ -1371,11 +1331,7 @@ test_read_bytes :: proc(t: ^testing.T) {
 		reader := create_reader(buffer)
 		data: [8]u8
 		success := read_bytes(&reader, data[:], 7)
-		testing.expect(
-			t,
-			success,
-			"Reading non-word-aligned data should succeed",
-		)
+		testing.expect(t, success, "Reading non-word-aligned data should succeed")
 		// First word
 		testing.expect_value(t, data[0], 0xAA)
 		testing.expect_value(t, data[1], 0xBB)
@@ -1444,11 +1400,7 @@ test_write_and_read_bytes :: proc(t: ^testing.T) {
 		b = u8(rand.int31_max(i32(math.max(u8)) + 1))
 	}
 
-	testing.expectf(
-		t,
-		write_bytes(&writer, random_bytes),
-		"write_bytes should be successful",
-	)
+	testing.expectf(t, write_bytes(&writer, random_bytes), "write_bytes should be successful")
 
 	des_bytes := make([]u8, num_words * size_of(u32))
 	defer delete(des_bytes)
@@ -1486,10 +1438,7 @@ test_multiple_write_and_single_read_bytes :: proc(t: ^testing.T) {
 
 	testing.expectf(
 		t,
-		write_bytes(
-			&writer,
-			random_bytes[len(random_bytes) / 2:len(random_bytes)],
-		),
+		write_bytes(&writer, random_bytes[len(random_bytes) / 2:len(random_bytes)]),
 		"write_bytes should be successful",
 	)
 
@@ -1529,10 +1478,7 @@ test_multiple_write_and_multiple_read_bytes :: proc(t: ^testing.T) {
 
 	testing.expectf(
 		t,
-		write_bytes(
-			&writer,
-			random_bytes[len(random_bytes) / 2:len(random_bytes)],
-		),
+		write_bytes(&writer, random_bytes[len(random_bytes) / 2:len(random_bytes)]),
 		"write_bytes should be successful",
 	)
 
@@ -1540,11 +1486,7 @@ test_multiple_write_and_multiple_read_bytes :: proc(t: ^testing.T) {
 	defer delete(des_bytes)
 	des_bytes_ok: bool
 
-	des_bytes_ok = read_bytes(
-		&reader,
-		des_bytes[0:len(des_bytes) / 2],
-		u32(len(des_bytes) / 2),
-	)
+	des_bytes_ok = read_bytes(&reader, des_bytes[0:len(des_bytes) / 2], u32(len(des_bytes) / 2))
 	testing.expectf(t, des_bytes_ok, "read_bytes should be successful")
 
 	des_bytes_ok = read_bytes(

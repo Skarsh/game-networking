@@ -18,10 +18,7 @@ Byte_Buffer :: struct {
 }
 
 
-compare_byte_buffers :: proc(
-	byte_buffer1: Byte_Buffer,
-	byte_buffer2: Byte_Buffer,
-) -> bool {
+compare_byte_buffers :: proc(byte_buffer1: Byte_Buffer, byte_buffer2: Byte_Buffer) -> bool {
 	if len(byte_buffer1.data) != len(byte_buffer2.data) {
 		return false
 	}
@@ -115,10 +112,7 @@ random_string :: proc(size: u32) -> string {
 }
 
 random_vector2 :: proc(lo: f32, hi: f32) -> proto.Vector2 {
-	return proto.Vector2 {
-		rand.float32_range(lo, hi),
-		rand.float32_range(lo, hi),
-	}
+	return proto.Vector2{rand.float32_range(lo, hi), rand.float32_range(lo, hi)}
 }
 
 random_vector3 :: proc(lo: f32, hi: f32) -> proto.Vector3 {
@@ -148,11 +142,7 @@ random_compressed_integer :: proc() -> proto.Compressed_Integer {
 	return proto.Compressed_Integer{value, min, max}
 }
 
-random_compressed_vector2 :: proc(
-	lo: f32,
-	hi: f32,
-	resolution: f32,
-) -> proto.Compressed_Vector2 {
+random_compressed_vector2 :: proc(lo: f32, hi: f32, resolution: f32) -> proto.Compressed_Vector2 {
 	val1 := rand.float32_range(lo, hi)
 	val2 := rand.float32_range(lo, hi)
 
@@ -176,11 +166,7 @@ random_compressed_vector2 :: proc(
 
 }
 
-random_compressed_vector3 :: proc(
-	lo: f32,
-	hi: f32,
-	resolution: f32,
-) -> proto.Compressed_Vector3 {
+random_compressed_vector3 :: proc(lo: f32, hi: f32, resolution: f32) -> proto.Compressed_Vector3 {
 	val1 := rand.float32_range(lo, hi)
 	val2 := rand.float32_range(lo, hi)
 
@@ -213,10 +199,7 @@ random_quaternion :: proc(lo: f32, hi: f32) -> proto.Quaternion {
 	}
 }
 
-serialize_test_data :: proc(
-	bit_writer: ^proto.Bit_Writer,
-	test_data: Test_Data,
-) -> bool {
+serialize_test_data :: proc(bit_writer: ^proto.Bit_Writer, test_data: Test_Data) -> bool {
 	switch data in test_data {
 	case i32:
 		return proto.serialize_integer(bit_writer, data, 0, math.max(i32))
@@ -231,12 +214,7 @@ serialize_test_data :: proc(
 	case Byte_Buffer:
 		return proto.serialize_bytes(bit_writer, data.data)
 	case proto.Compressed_Integer:
-		return proto.serialize_integer(
-			bit_writer,
-			data.value,
-			data.min,
-			data.max,
-		)
+		return proto.serialize_integer(bit_writer, data.value, data.min, data.max)
 	case proto.Compressed_Vector2:
 		return proto.serialize_compressed_vector2(
 			bit_writer,
@@ -269,19 +247,11 @@ deserialize_test_data :: proc(
 ) {
 	switch data in test_data {
 	case i32:
-		value, success := proto.deserialize_integer(
-			bit_reader,
-			0,
-			math.max(i32),
-		)
+		value, success := proto.deserialize_integer(bit_reader, 0, math.max(i32))
 		assert(success, "Failed to deserialize integer")
 		assert(
 			value == data,
-			fmt.tprintf(
-				"i32's are not equal, expected %v, but got %v",
-				data,
-				value,
-			),
+			fmt.tprintf("i32's are not equal, expected %v, but got %v", data, value),
 		)
 		return value, success
 	case f32:
@@ -289,11 +259,7 @@ deserialize_test_data :: proc(
 		assert(success, "Failed to deserialize integer")
 		assert(
 			value == data,
-			fmt.tprintf(
-				"f32's are not equal, expected %v, but got %v",
-				data,
-				value,
-			),
+			fmt.tprintf("f32's are not equal, expected %v, but got %v", data, value),
 		)
 		return value, success
 	case proto.Vector2:
@@ -301,11 +267,7 @@ deserialize_test_data :: proc(
 		assert(success, "Failed to deserialize Vector2")
 		assert(
 			value == data,
-			fmt.tprintf(
-				"Vector2's are not equal, expected %v, but got %v",
-				data,
-				value,
-			),
+			fmt.tprintf("Vector2's are not equal, expected %v, but got %v", data, value),
 		)
 		return value, success
 	case proto.Vector3:
@@ -313,11 +275,7 @@ deserialize_test_data :: proc(
 		assert(success, "Failed to deserialize Vector3")
 		assert(
 			value == data,
-			fmt.tprintf(
-				"Vector3's are not equal, expected %v, but got %v",
-				data,
-				value,
-			),
+			fmt.tprintf("Vector3's are not equal, expected %v, but got %v", data, value),
 		)
 		return value, success
 	case proto.Quaternion:
@@ -325,39 +283,20 @@ deserialize_test_data :: proc(
 		assert(success, "Failed to deserialize Quaternion")
 		assert(
 			value == data,
-			fmt.tprintf(
-				"Quaternions are not equal, expected %v, but got %v",
-				data,
-				value,
-			),
+			fmt.tprintf("Quaternions are not equal, expected %v, but got %v", data, value),
 		)
 		return value, success
 	case Byte_Buffer:
 		byte_buffer := Byte_Buffer {
 			data = make([]u8, len(data.data), context.temp_allocator),
 		}
-		success := proto.deserialize_bytes(
-			bit_reader,
-			byte_buffer.data,
-			u32(len(data.data)),
-		)
+		success := proto.deserialize_bytes(bit_reader, byte_buffer.data, u32(len(data.data)))
 		assert(success, "Failed to deserialize bytes")
-		assert(
-			compare_byte_buffers(byte_buffer, data),
-			"Byte buffers are not equal",
-		)
+		assert(compare_byte_buffers(byte_buffer, data), "Byte buffers are not equal")
 		return byte_buffer, success
 	case proto.Compressed_Integer:
-		value, success := proto.deserialize_integer(
-			bit_reader,
-			data.min,
-			data.max,
-		)
-		compressed_integer := proto.Compressed_Integer {
-			value,
-			data.min,
-			data.max,
-		}
+		value, success := proto.deserialize_integer(bit_reader, data.min, data.max)
+		compressed_integer := proto.Compressed_Integer{value, data.min, data.max}
 		assert(success, "Failed to deserialize integer")
 		assert(
 			compressed_integer == data,
@@ -387,13 +326,7 @@ deserialize_test_data :: proc(
 				data.resolution,
 			),
 		)
-		return proto.Compressed_Vector2 {
-				value,
-				data.min,
-				data.max,
-				data.resolution,
-			},
-			success
+		return proto.Compressed_Vector2{value, data.min, data.max, data.resolution}, success
 	case proto.Compressed_Vector3:
 		value, success := proto.deserialize_compressed_vector3(
 			bit_reader,
@@ -413,27 +346,14 @@ deserialize_test_data :: proc(
 				data.resolution,
 			),
 		)
-		return proto.Compressed_Vector3 {
-				value,
-				data.min,
-				data.max,
-				data.resolution,
-			},
-			success
+		return proto.Compressed_Vector3{value, data.min, data.max, data.resolution}, success
 	case string:
-		value, success := proto.deserialize_string(
-			bit_reader,
-			context.temp_allocator,
-		)
+		value, success := proto.deserialize_string(bit_reader, context.temp_allocator)
 		log.debug("value: ", value)
 		assert(success, "Failed to serialize string")
 		assert(
 			value == data,
-			fmt.tprintf(
-				"Strings are not equal, expected %v, but got %v",
-				data,
-				value,
-			),
+			fmt.tprintf("Strings are not equal, expected %v, but got %v", data, value),
 		)
 		return value, success
 	case:
@@ -463,10 +383,7 @@ run_serialization_tests :: proc(allocator := context.temp_allocator) {
 		tests_data[i] = random_test_data_type(lo, hi, resolution)
 		log.debugf("Testdata: %v", tests_data[i])
 		success := serialize_test_data(&writer, tests_data[i])
-		assert(
-			success,
-			fmt.tprintf("Failed to serialize test_data: %v", tests_data[i]),
-		)
+		assert(success, fmt.tprintf("Failed to serialize test_data: %v", tests_data[i]))
 	}
 
 	flush_success := proto.flush_bits(&writer)
@@ -476,21 +393,12 @@ run_serialization_tests :: proc(allocator := context.temp_allocator) {
 	for i in 0 ..< len(tests_data) {
 		test_data := tests_data[i]
 		value, success := deserialize_test_data(&reader, test_data)
-		assert(
-			success,
-			fmt.tprintf("Failed to deserialize test_data: %v", value),
-		)
+		assert(success, fmt.tprintf("Failed to deserialize test_data: %v", value))
 	}
 
-	assert(
-		writer.bits_written == reader.bits_read,
-		"Bits written is not equal to bits read",
-	)
+	assert(writer.bits_written == reader.bits_read, "Bits written is not equal to bits read")
 
-	log.debugf(
-		"writer bytes written: %v",
-		proto.get_writer_bytes_written(writer),
-	)
+	log.debugf("writer bytes written: %v", proto.get_writer_bytes_written(writer))
 }
 
 main :: proc() {
@@ -500,19 +408,13 @@ main :: proc() {
 
 	defer {
 		if len(track.allocation_map) > 0 {
-			fmt.eprintf(
-				"=== %v allocations not freed: ===\n",
-				len(track.allocation_map),
-			)
+			fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
 			for _, entry in track.allocation_map {
 				fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
 			}
 		}
 		if len(track.bad_free_array) > 0 {
-			fmt.eprintf(
-				"=== %v incorrect frees: ===\n",
-				len(track.bad_free_array),
-			)
+			fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
 			for entry in track.bad_free_array {
 				fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
 			}

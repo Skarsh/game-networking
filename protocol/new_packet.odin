@@ -92,20 +92,13 @@ Realtime_Packet_Buffer :: struct {
 // ------------- Serializiation procedures -------------
 
 @(require_results)
-serialize_packet_header :: proc(
-	bit_writer: ^Bit_Writer,
-	packet_header: Packet_Header,
-) -> bool {
+serialize_packet_header :: proc(bit_writer: ^Bit_Writer, packet_header: Packet_Header) -> bool {
 
 	write_bits(bit_writer, packet_header.crc32, 32) or_return
 
 	// NOTE(Thomas): This len(Packet_Type) - 1 trick only works if 
 	// there is more than one variant in the Packet_Type enum
-	write_bits(
-		bit_writer,
-		u32(packet_header.packet_type),
-		len(Packet_Type) - 1,
-	) or_return
+	write_bits(bit_writer, u32(packet_header.packet_type), len(Packet_Type) - 1) or_return
 
 	write_bits(bit_writer, u32(packet_header.data_length), 32) or_return
 
@@ -154,10 +147,7 @@ serialize_realtime_packet :: proc(
 }
 
 @(require_results)
-serialize_fragment :: proc(
-	bit_writer: ^Bit_Writer,
-	fragment: Fragment,
-) -> bool {
+serialize_fragment :: proc(bit_writer: ^Bit_Writer, fragment: Fragment) -> bool {
 	write_bits(bit_writer, fragment.fragment_size, 32) or_return
 
 	write_bits(bit_writer, u32(fragment.fragment_id), 8) or_return
@@ -175,12 +165,7 @@ serialize_fragment :: proc(
 // ------------- Deserializiation procedures -------------
 
 @(require_results)
-deserialize_packet_header :: proc(
-	bit_reader: ^Bit_Reader,
-) -> (
-	Packet_Header,
-	bool,
-) {
+deserialize_packet_header :: proc(bit_reader: ^Bit_Reader) -> (Packet_Header, bool) {
 
 	crc32, crc32_ok := read_bits(bit_reader, 32)
 	if !crc32_ok {
@@ -248,10 +233,7 @@ deserialize_realtime_packet :: proc(
 	bool,
 ) {
 
-	packet_type, packet_type_ok := read_bits(
-		bit_reader,
-		len(Realtime_Packet_Type) - 1,
-	)
+	packet_type, packet_type_ok := read_bits(bit_reader, len(Realtime_Packet_Type) - 1)
 	if !packet_type_ok {
 		return Realtime_Packet{}, false
 	}
@@ -365,10 +347,7 @@ process_packet :: proc(
 	// Check which packet type this is
 	switch Packet_Type(packet.packet_header.packet_type) {
 	case .Realtime:
-		realtime_packet, realtime_packet_ok := deserialize_realtime_packet(
-			&reader,
-			allocator,
-		)
+		realtime_packet, realtime_packet_ok := deserialize_realtime_packet(&reader, allocator)
 		if !realtime_packet_ok {
 			return false
 		}
@@ -397,20 +376,12 @@ compare_packet :: proc(packet_a: Packet, packet_b: Packet) -> bool {
 }
 
 @(require_results)
-compare_realtime_packet :: proc(
-	packet_a: Realtime_Packet,
-	packet_b: Realtime_Packet,
-) -> bool {
+compare_realtime_packet :: proc(packet_a: Realtime_Packet, packet_b: Realtime_Packet) -> bool {
 	equal_packet_type := packet_a.packet_type == packet_b.packet_type
 	equal_data_length := packet_a.data_length == packet_b.data_length
 	equal_is_fragment := packet_a.is_fragment == packet_b.is_fragment
 	equal_data := bytes.compare(packet_a.data, packet_b.data) == 0
-	return(
-		equal_packet_type &&
-		equal_data_length &&
-		equal_is_fragment &&
-		equal_data \
-	)
+	return equal_packet_type && equal_data_length && equal_is_fragment && equal_data
 }
 
 @(require_results)
@@ -419,12 +390,7 @@ compare_fragment :: proc(fragment_a: Fragment, fragment_b: Fragment) -> bool {
 	equal_fragment_id := fragment_a.fragment_id == fragment_b.fragment_id
 	equal_num_fragments := fragment_a.num_fragments == fragment_b.num_fragments
 	equal_data := bytes.compare(fragment_a.data, fragment_b.data) == 0
-	return(
-		equal_fragment_size &&
-		equal_fragment_id &&
-		equal_num_fragments &&
-		equal_data \
-	)
+	return equal_fragment_size && equal_fragment_id && equal_num_fragments && equal_data
 
 }
 
@@ -452,15 +418,9 @@ test_serialize_deserialize_packet_header :: proc(t: ^testing.T) {
 
 	testing.expectf(t, flush_bits(&writer), "flush_bits should be successful")
 
-	des_packet_header, des_packet_header_ok := deserialize_packet_header(
-		&reader,
-	)
+	des_packet_header, des_packet_header_ok := deserialize_packet_header(&reader)
 
-	testing.expectf(
-		t,
-		des_packet_header_ok,
-		"deserialize_packet_header should be successful",
-	)
+	testing.expectf(t, des_packet_header_ok, "deserialize_packet_header should be successful")
 
 	testing.expect_value(t, des_packet_header, packet_header)
 }
@@ -488,24 +448,13 @@ test_serialize_deserialize_packet :: proc(t: ^testing.T) {
 
 	packet := Packet{packet_header, data}
 
-	testing.expectf(
-		t,
-		serialize_packet(&writer, packet),
-		"serialize_packet should be successful",
-	)
+	testing.expectf(t, serialize_packet(&writer, packet), "serialize_packet should be successful")
 
 	testing.expectf(t, flush_bits(&writer), "flush_bits should be successful")
 
-	des_packet, des_packet_ok := deserialize_packet(
-		&reader,
-		context.temp_allocator,
-	)
+	des_packet, des_packet_ok := deserialize_packet(&reader, context.temp_allocator)
 
-	testing.expectf(
-		t,
-		des_packet_ok,
-		"deserialize_packet should be successful",
-	)
+	testing.expectf(t, des_packet_ok, "deserialize_packet should be successful")
 
 	testing.expectf(
 		t,
@@ -549,20 +498,12 @@ test_serialize_deserialize_realtime_packet :: proc(t: ^testing.T) {
 		context.temp_allocator,
 	)
 
-	testing.expectf(
-		t,
-		des_realtime_packet_ok,
-		"deserialize_realtime_packet should be successful",
-	)
+	testing.expectf(t, des_realtime_packet_ok, "deserialize_realtime_packet should be successful")
 
 	testing.expectf(
 		t,
 		compare_realtime_packet(des_realtime_packet, realtime_packet),
-		fmt.tprintf(
-			"expected %v to be equal to %v",
-			realtime_packet,
-			des_realtime_packet,
-		),
+		fmt.tprintf("expected %v to be equal to %v", realtime_packet, des_realtime_packet),
 	)
 }
 
@@ -595,16 +536,9 @@ test_serialize_deserialize_fragment :: proc(t: ^testing.T) {
 
 	testing.expectf(t, flush_bits(&writer), "flush_bits should be successful")
 
-	des_fragment, des_fragment_ok := deserialize_fragment(
-		&reader,
-		context.temp_allocator,
-	)
+	des_fragment, des_fragment_ok := deserialize_fragment(&reader, context.temp_allocator)
 
-	testing.expectf(
-		t,
-		des_fragment_ok,
-		"deserialize_fragment should be successful",
-	)
+	testing.expectf(t, des_fragment_ok, "deserialize_fragment should be successful")
 
 	testing.expectf(
 		t,

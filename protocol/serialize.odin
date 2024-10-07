@@ -60,14 +60,8 @@ bits_required :: proc(min, max: i32) -> int {
 }
 
 @(require_results)
-serialize_integer :: proc(
-	bit_writer: ^Bit_Writer,
-	value, min, max: i32,
-) -> bool {
-	assert(
-		min < max,
-		fmt.tprintf("assumed min %v is smaller than max %v", min, max),
-	)
+serialize_integer :: proc(bit_writer: ^Bit_Writer, value, min, max: i32) -> bool {
+	assert(min < max, fmt.tprintf("assumed min %v is smaller than max %v", min, max))
 	assert(value >= min, fmt.tprintf("assumed value %v >= min %v", value, min))
 	assert(value <= max, fmt.tprintf("assumed value %v <= max %v", value, max))
 	bits := bits_required(min, max)
@@ -77,14 +71,7 @@ serialize_integer :: proc(
 }
 
 @(require_results)
-deserialize_integer :: proc(
-	bit_reader: ^Bit_Reader,
-	min: i32,
-	max: i32,
-) -> (
-	i32,
-	bool,
-) {
+deserialize_integer :: proc(bit_reader: ^Bit_Reader, min: i32, max: i32) -> (i32, bool) {
 	assert(min < max)
 	bits := bits_required(min, max)
 	unsigned_value, success := read_bits(bit_reader, u32(bits))
@@ -145,14 +132,8 @@ serialize_compressed_float :: proc(
 	max: f32,
 	resolution: f32,
 ) -> bool {
-	assert(
-		min < max,
-		fmt.tprintf("assumed min %v is smaller than max %v", min, max),
-	)
-	assert(
-		resolution != 0.0,
-		fmt.tprintf("assumed resolution is not equal to 0.0"),
-	)
+	assert(min < max, fmt.tprintf("assumed min %v is smaller than max %v", min, max))
+	assert(resolution != 0.0, fmt.tprintf("assumed resolution is not equal to 0.0"))
 	// Example 
 	// value = 15
 	// min = 10
@@ -179,9 +160,7 @@ serialize_compressed_float :: proc(
 	required_bits := bits_required(0, i32(max_integer_value))
 
 	normalized_value := math.clamp((value - min) / delta, 0, 1)
-	integer_value := u32(
-		math.floor(normalized_value * f32(max_integer_value) + 0.5),
-	)
+	integer_value := u32(math.floor(normalized_value * f32(max_integer_value) + 0.5))
 
 	return write_bits(bit_writer, integer_value, u32(required_bits))
 }
@@ -208,14 +187,8 @@ deserialize_compressed_float :: proc(
 	f32,
 	bool,
 ) {
-	assert(
-		min < max,
-		fmt.tprintf("assumed min %v is smaller than max %v", min, max),
-	)
-	assert(
-		resolution != 0.0,
-		fmt.tprintf("assumed resolution is not equal to 0.0"),
-	)
+	assert(min < max, fmt.tprintf("assumed min %v is smaller than max %v", min, max))
+	assert(resolution != 0.0, fmt.tprintf("assumed resolution is not equal to 0.0"))
 
 	// Example - continuing from the serialization above
 	// min = 10
@@ -308,20 +281,8 @@ serialize_compressed_vector2 :: proc(
 	max: f32,
 	resolution: f32,
 ) -> bool {
-	serialize_compressed_float(
-		bit_writer,
-		vec2[0],
-		min,
-		max,
-		resolution,
-	) or_return
-	serialize_compressed_float(
-		bit_writer,
-		vec2[1],
-		min,
-		max,
-		resolution,
-	) or_return
+	serialize_compressed_float(bit_writer, vec2[0], min, max, resolution) or_return
+	serialize_compressed_float(bit_writer, vec2[1], min, max, resolution) or_return
 
 	return true
 }
@@ -336,22 +297,12 @@ deserialize_compressed_vector2 :: proc(
 	Vector2,
 	bool,
 ) {
-	x, success1 := deserialize_compressed_float(
-		bit_reader,
-		min,
-		max,
-		resolution,
-	)
+	x, success1 := deserialize_compressed_float(bit_reader, min, max, resolution)
 	if !success1 {
 		return {}, false
 	}
 
-	y, success2 := deserialize_compressed_float(
-		bit_reader,
-		min,
-		max,
-		resolution,
-	)
+	y, success2 := deserialize_compressed_float(bit_reader, min, max, resolution)
 	if !success2 {
 		return {}, false
 	}
@@ -392,32 +343,17 @@ deserialize_compressed_vector3 :: proc(
 	Vector3,
 	bool,
 ) {
-	x, success1 := deserialize_compressed_float(
-		bit_reader,
-		min,
-		max,
-		resolution,
-	)
+	x, success1 := deserialize_compressed_float(bit_reader, min, max, resolution)
 	if !success1 {
 		return Vector3{}, false
 	}
 
-	y, success2 := deserialize_compressed_float(
-		bit_reader,
-		min,
-		max,
-		resolution,
-	)
+	y, success2 := deserialize_compressed_float(bit_reader, min, max, resolution)
 	if !success2 {
 		return Vector3{}, false
 	}
 
-	z, success3 := deserialize_compressed_float(
-		bit_reader,
-		min,
-		max,
-		resolution,
-	)
+	z, success3 := deserialize_compressed_float(bit_reader, min, max, resolution)
 	if !success3 {
 		return Vector3{}, false
 	}
@@ -426,10 +362,7 @@ deserialize_compressed_vector3 :: proc(
 }
 
 @(require_results)
-serialize_quaternion :: proc(
-	bit_writer: ^Bit_Writer,
-	quat: Quaternion,
-) -> bool {
+serialize_quaternion :: proc(bit_writer: ^Bit_Writer, quat: Quaternion) -> bool {
 	serialize_float(bit_writer, quat[0]) or_return
 	serialize_float(bit_writer, quat[1]) or_return
 	serialize_float(bit_writer, quat[2]) or_return
@@ -484,11 +417,7 @@ serialize_bytes :: proc(bit_writer: ^Bit_Writer, data: []u8) -> bool {
 }
 
 @(require_results)
-deserialize_bytes :: proc(
-	bit_reader: ^Bit_Reader,
-	data: []u8,
-	bytes: u32,
-) -> bool {
+deserialize_bytes :: proc(bit_reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	assert(len(data) > 0)
 	assert(bytes > 0)
 	deserialize_align(bit_reader) or_return
@@ -520,11 +449,7 @@ deserialize_string :: proc(
 	string,
 	bool,
 ) {
-	str_len, success := deserialize_integer(
-		bit_reader,
-		0,
-		i32(len(bit_reader.buffer)),
-	)
+	str_len, success := deserialize_integer(bit_reader, 0, i32(len(bit_reader.buffer)))
 	if !success {
 		return "", false
 	}
@@ -731,13 +656,7 @@ test_serialize_deserialize_compressed_float :: proc(t: ^testing.T) {
 	resolution: f32 = 0.01
 
 	// Serialize
-	res := serialize_compressed_float(
-		&writer,
-		original_value,
-		min,
-		max,
-		resolution,
-	)
+	res := serialize_compressed_float(&writer, original_value, min, max, resolution)
 	testing.expect(t, res)
 
 	// Flush to memory
@@ -745,12 +664,7 @@ test_serialize_deserialize_compressed_float :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Deserialize
-	deserialized_value, success := deserialize_compressed_float(
-		&reader,
-		min,
-		max,
-		resolution,
-	)
+	deserialized_value, success := deserialize_compressed_float(&reader, min, max, resolution)
 	testing.expect(t, success)
 	testing.expect(
 		t,
@@ -771,13 +685,7 @@ test_serialize_deserialize_compressed_negative_float :: proc(t: ^testing.T) {
 	resolution: f32 = 0.01
 
 	// Serialize
-	res := serialize_compressed_float(
-		&writer,
-		original_value,
-		min,
-		max,
-		resolution,
-	)
+	res := serialize_compressed_float(&writer, original_value, min, max, resolution)
 	testing.expect(t, res)
 
 	// Flush to memory
@@ -785,12 +693,7 @@ test_serialize_deserialize_compressed_negative_float :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Deserialize
-	deserialized_value, success := deserialize_compressed_float(
-		&reader,
-		min,
-		max,
-		resolution,
-	)
+	deserialized_value, success := deserialize_compressed_float(&reader, min, max, resolution)
 	testing.expect(t, success)
 	testing.expect(
 		t,
@@ -865,13 +768,7 @@ test_serialize_deserialize_compressed_vector2 :: proc(t: ^testing.T) {
 	resolution: f32 = 0.01
 
 	// Serialize
-	res := serialize_compressed_vector2(
-		&writer,
-		original_vec,
-		min,
-		max,
-		resolution,
-	)
+	res := serialize_compressed_vector2(&writer, original_vec, min, max, resolution)
 	testing.expect(t, res)
 
 	// Flush to memory
@@ -879,12 +776,7 @@ test_serialize_deserialize_compressed_vector2 :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Deserialize
-	deserialized_vec, success := deserialize_compressed_vector2(
-		&reader,
-		min,
-		max,
-		resolution,
-	)
+	deserialized_vec, success := deserialize_compressed_vector2(&reader, min, max, resolution)
 	testing.expect(t, success)
 
 	testing.expect(
@@ -907,13 +799,7 @@ test_serialize_deserialize_compressed_vector3 :: proc(t: ^testing.T) {
 	resolution: f32 = 0.01
 
 	// Serialize
-	res := serialize_compressed_vector3(
-		&writer,
-		original_vec,
-		min,
-		max,
-		resolution,
-	)
+	res := serialize_compressed_vector3(&writer, original_vec, min, max, resolution)
 	testing.expect(t, res)
 
 	// Flush to memory
@@ -921,12 +807,7 @@ test_serialize_deserialize_compressed_vector3 :: proc(t: ^testing.T) {
 	testing.expect(t, res)
 
 	// Deserialize
-	deserialized_vec, success := deserialize_compressed_vector3(
-		&reader,
-		min,
-		max,
-		resolution,
-	)
+	deserialized_vec, success := deserialize_compressed_vector3(&reader, min, max, resolution)
 	testing.expect(t, success)
 
 	testing.expect(
@@ -1027,20 +908,12 @@ test_serialize_deserialize_string :: proc(t: ^testing.T) {
 	reader := create_reader(buffer)
 	str := "hello"
 	success := serialize_string(&writer, str)
-	testing.expect(
-		t,
-		success,
-		fmt.tprintf("Should be able to serialize the string %s", str),
-	)
+	testing.expect(t, success, fmt.tprintf("Should be able to serialize the string %s", str))
 	flush_success := flush_bits(&writer)
 	testing.expect(t, flush_success, "Flushing the bits should be successful")
 
 	des_str, str_success := deserialize_string(&reader, context.temp_allocator)
-	testing.expect(
-		t,
-		str_success,
-		fmt.tprintf("Should be able deserialize string %s", str),
-	)
+	testing.expect(t, str_success, fmt.tprintf("Should be able deserialize string %s", str))
 	testing.expect_value(t, des_str, str)
 }
 
@@ -1052,19 +925,11 @@ test_serialize_deserialize_string_with_newline :: proc(t: ^testing.T) {
 	reader := create_reader(buffer)
 	str := "hello\nworld"
 	success := serialize_string(&writer, str)
-	testing.expect(
-		t,
-		success,
-		fmt.tprint("Should be able to serialize the string '%s'", str),
-	)
+	testing.expect(t, success, fmt.tprint("Should be able to serialize the string '%s'", str))
 	flush_success := flush_bits(&writer)
 	testing.expect(t, flush_success, "Flushing the bits should be successful")
 
 	des_str, str_success := deserialize_string(&reader, context.temp_allocator)
-	testing.expect(
-		t,
-		str_success,
-		fmt.tprintf("Should be able deserialize string '%s'", str),
-	)
+	testing.expect(t, str_success, fmt.tprintf("Should be able deserialize string '%s'", str))
 	testing.expect_value(t, des_str, str)
 }
