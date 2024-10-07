@@ -51,6 +51,7 @@ vec3_approx_equal :: proc "contextless" (a, b: [3]f32, epsilon: f32) -> bool {
 	)
 }
 
+@(require_results)
 bits_required :: proc(min, max: i32) -> int {
 	assert(min < max)
 	if min == max {
@@ -60,14 +61,55 @@ bits_required :: proc(min, max: i32) -> int {
 }
 
 @(require_results)
+serialize_u8 :: proc(bit_writer: ^Bit_Writer, value: u8) -> bool {
+	return write_bits(bit_writer, u32(value), 8)
+}
+
+@(require_results)
+deserialize_u8 :: proc(bit_reader: ^Bit_Reader) -> (u8, bool) {
+	val, success := read_bits(bit_reader, 8)
+	if !success {
+		return 0, false
+	}
+	return u8(val), true
+}
+
+@(require_results)
+serialize_u16 :: proc(bit_writer: ^Bit_Writer, value: u16) -> bool {
+	return write_bits(bit_writer, u32(value), 16)
+}
+
+@(require_results)
+deserialize_u16 :: proc(bit_reader: ^Bit_Reader) -> (u16, bool) {
+	val, success := read_bits(bit_reader, 16)
+	if !success {
+		return 0, false
+	}
+	return u16(val), true
+}
+
+@(require_results)
+serialize_u32 :: proc(bit_writer: ^Bit_Writer, value: u32) -> bool {
+	return write_bits(bit_writer, value, 32)
+}
+
+@(require_results)
+deserialize_u32 :: proc(bit_reader: ^Bit_Reader) -> (u32, bool) {
+	val, success := read_bits(bit_reader, 32)
+	if !success {
+		return 0, false
+	}
+	return u32(val), true
+}
+
+@(require_results)
 serialize_integer :: proc(bit_writer: ^Bit_Writer, value, min, max: i32) -> bool {
 	assert(min < max, fmt.tprintf("assumed min %v is smaller than max %v", min, max))
 	assert(value >= min, fmt.tprintf("assumed value %v >= min %v", value, min))
 	assert(value <= max, fmt.tprintf("assumed value %v <= max %v", value, max))
 	bits := bits_required(min, max)
 	unsigned_value := u32(value - min)
-	success := write_bits(bit_writer, unsigned_value, u32(bits))
-	return success
+	return write_bits(bit_writer, unsigned_value, u32(bits))
 }
 
 @(require_results)
@@ -542,7 +584,7 @@ test_serialize_deserialize_negative_integer :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_serialize_deserialize_edge_cases :: proc(t: ^testing.T) {
+test_serialize_deserialize_integer_edge_cases :: proc(t: ^testing.T) {
 	buffer := []u32{0, 0}
 	writer := create_writer(buffer[:])
 	reader := create_reader(buffer[:])
@@ -574,6 +616,111 @@ test_serialize_deserialize_edge_cases :: proc(t: ^testing.T) {
 		deserialized_value, success := deserialize_integer(&reader, min, max)
 		testing.expect(t, success)
 		testing.expect_value(t, deserialized_value, value)
+	}
+}
+
+@(test)
+test_serialize_deserialize_u8 :: proc(t: ^testing.T) {
+	// Case 1: serialize 0
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		val: u8 = 0
+		testing.expect(t, serialize_u8(&writer, val))
+
+		testing.expect(t, flush_bits(&writer))
+
+		des_val, success := deserialize_u8(&reader)
+		testing.expect(t, success)
+		testing.expect_value(t, des_val, val)
+	}
+
+	// Case 2: serialize 255
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		val: u8 = 255
+		testing.expect(t, serialize_u8(&writer, val))
+
+		testing.expect(t, flush_bits(&writer))
+
+		des_val, success := deserialize_u8(&reader)
+		testing.expect(t, success)
+		testing.expect_value(t, des_val, val)
+	}
+}
+
+@(test)
+test_serialize_deserialize_u16 :: proc(t: ^testing.T) {
+	// Case 1: serialize 0
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		val: u16 = 0
+		testing.expect(t, serialize_u16(&writer, val))
+
+		testing.expect(t, flush_bits(&writer))
+
+		des_val, success := deserialize_u16(&reader)
+		testing.expect(t, success)
+		testing.expect_value(t, des_val, val)
+	}
+
+	// Case 2: serialize 65535
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		val: u16 = 65535
+		testing.expect(t, serialize_u16(&writer, val))
+
+		testing.expect(t, flush_bits(&writer))
+
+		des_val, success := deserialize_u16(&reader)
+		testing.expect(t, success)
+		testing.expect_value(t, des_val, val)
+	}
+}
+
+@(test)
+test_serialize_deserialize_u32 :: proc(t: ^testing.T) {
+	// Case 1: serialize 0
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		val: u32 = 0
+		testing.expect(t, serialize_u32(&writer, val))
+
+		testing.expect(t, flush_bits(&writer))
+
+		des_val, success := deserialize_u32(&reader)
+		testing.expect(t, success)
+		testing.expect_value(t, des_val, val)
+	}
+
+	// Case 2: serialize 4294967295
+	{
+		buffer := []u32{0}
+		writer := create_writer(buffer[:])
+		reader := create_reader(buffer[:])
+
+		val: u32 = 4294967295
+		testing.expect(t, serialize_u32(&writer, val))
+
+		testing.expect(t, flush_bits(&writer))
+
+		des_val, success := deserialize_u32(&reader)
+		testing.expect(t, success)
+		testing.expect_value(t, des_val, val)
 	}
 }
 

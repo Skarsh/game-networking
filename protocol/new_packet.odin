@@ -94,15 +94,14 @@ Realtime_Packet_Buffer :: struct {
 @(require_results)
 serialize_packet_header :: proc(bit_writer: ^Bit_Writer, packet_header: Packet_Header) -> bool {
 
-	write_bits(bit_writer, packet_header.crc32, 32) or_return
+	serialize_u32(bit_writer, packet_header.crc32) or_return
 
 	// NOTE(Thomas): This len(Packet_Type) - 1 trick only works if 
 	// there is more than one variant in the Packet_Type enum
 	write_bits(bit_writer, u32(packet_header.packet_type), len(Packet_Type) - 1) or_return
 
-	write_bits(bit_writer, u32(packet_header.data_length), 32) or_return
-
-	write_bits(bit_writer, u32(packet_header.sequence), 16) or_return
+	serialize_u32(bit_writer, packet_header.data_length) or_return
+	serialize_u16(bit_writer, packet_header.sequence) or_return
 
 	return true
 }
@@ -134,7 +133,7 @@ serialize_realtime_packet :: proc(
 		len(Realtime_Packet_Type) - 1,
 	) or_return
 
-	write_bits(bit_writer, realtime_packet.data_length, 32) or_return
+	serialize_u32(bit_writer, realtime_packet.data_length) or_return
 
 	serialize_bool(bit_writer, realtime_packet.is_fragment) or_return
 
@@ -148,11 +147,9 @@ serialize_realtime_packet :: proc(
 
 @(require_results)
 serialize_fragment :: proc(bit_writer: ^Bit_Writer, fragment: Fragment) -> bool {
-	write_bits(bit_writer, fragment.fragment_size, 32) or_return
-
-	write_bits(bit_writer, u32(fragment.fragment_id), 8) or_return
-
-	write_bits(bit_writer, u32(fragment.num_fragments), 8) or_return
+	serialize_u32(bit_writer, fragment.fragment_size) or_return
+	serialize_u8(bit_writer, fragment.fragment_id) or_return
+	serialize_u8(bit_writer, fragment.num_fragments) or_return
 
 	// Ensure we're aligned with next byte boundary
 	serialize_align(bit_writer) or_return
@@ -167,7 +164,7 @@ serialize_fragment :: proc(bit_writer: ^Bit_Writer, fragment: Fragment) -> bool 
 @(require_results)
 deserialize_packet_header :: proc(bit_reader: ^Bit_Reader) -> (Packet_Header, bool) {
 
-	crc32, crc32_ok := read_bits(bit_reader, 32)
+	crc32, crc32_ok := deserialize_u32(bit_reader)
 	if !crc32_ok {
 		return Packet_Header{}, false
 	}
@@ -177,12 +174,12 @@ deserialize_packet_header :: proc(bit_reader: ^Bit_Reader) -> (Packet_Header, bo
 		return Packet_Header{}, false
 	}
 
-	data_length, data_length_ok := read_bits(bit_reader, 32)
+	data_length, data_length_ok := deserialize_u32(bit_reader)
 	if !data_length_ok {
 		return Packet_Header{}, false
 	}
 
-	sequence, seq_ok := read_bits(bit_reader, 16)
+	sequence, seq_ok := deserialize_u16(bit_reader)
 	if !seq_ok {
 		return Packet_Header{}, false
 	}
@@ -238,7 +235,7 @@ deserialize_realtime_packet :: proc(
 		return Realtime_Packet{}, false
 	}
 
-	data_length, data_length_ok := read_bits(bit_reader, 32)
+	data_length, data_length_ok := deserialize_u32(bit_reader)
 	if !data_length_ok {
 		return Realtime_Packet{}, false
 	}
@@ -277,17 +274,17 @@ deserialize_fragment :: proc(
 	bool,
 ) {
 
-	fragment_size, fragment_size_ok := read_bits(bit_reader, 32)
+	fragment_size, fragment_size_ok := deserialize_u32(bit_reader)
 	if !fragment_size_ok {
 		return Fragment{}, false
 	}
 
-	fragment_id, fragment_id_ok := read_bits(bit_reader, 8)
+	fragment_id, fragment_id_ok := deserialize_u8(bit_reader)
 	if !fragment_id_ok {
 		return Fragment{}, false
 	}
 
-	num_fragments, num_fragments_ok := read_bits(bit_reader, 8)
+	num_fragments, num_fragments_ok := deserialize_u8(bit_reader)
 	if !num_fragments_ok {
 		return Fragment{}, false
 	}
