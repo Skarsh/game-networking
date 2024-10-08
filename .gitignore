@@ -10,7 +10,7 @@
 *.exe
 
 # Name of executable file on Linux
-udp 
+game-networking
 
 # Directories
 .vscode/
