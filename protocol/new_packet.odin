@@ -10,6 +10,12 @@ MAX_FRAGMENTS_PER_PACKET :: 256
 MAX_FRAGMENT_SIZE :: 1024
 MAX_PACKET_SIZE :: MAX_FRAGMENTS_PER_PACKET * MAX_FRAGMENT_SIZE
 
+MAX_ENTRIES :: 256
+
+// Used to represent empty entries since it cannot occur
+// by 16 bit sequence numbers.
+ENTRY_SENTINEL_VALUE :: 0xFFFF_FFFF
+
 Test_Packet_A :: struct {
 	a: i32,
 	b: i32,
@@ -86,7 +92,7 @@ Realtime_Packet_Entry :: struct {
 
 Realtime_Packet_Buffer :: struct {
 	current_sequence: u32,
-	entries:          [256]Realtime_Packet_Entry,
+	entries:          [MAX_ENTRIES]Realtime_Packet_Entry,
 }
 
 // ------------- Serializiation procedures -------------
@@ -308,6 +314,24 @@ deserialize_fragment :: proc(
 		true
 }
 
+get_sequence_index :: proc(sequence: u16) -> i32 {
+	return i32(sequence % MAX_ENTRIES)
+}
+
+process_fragment :: proc(
+	realtime_packet_buffer: ^Realtime_Packet_Buffer,
+	sequence: u16,
+	fragment: Fragment,
+	allocator: runtime.Allocator,
+) -> bool {
+	assert(len(fragment.data) > 0)
+	assert(len(fragment.data) <= MAX_FRAGMENT_SIZE)
+
+	index := get_sequence_index(sequence)
+
+	return true
+}
+
 @(require_results)
 process_packet :: proc(
 	realtime_packet_buffer: ^Realtime_Packet_Buffer,
@@ -355,6 +379,13 @@ process_packet :: proc(
 			if !fragment_ok {
 				return false
 			}
+			// TODO(Thomas): Pass in the same allocator?
+			process_fragment(
+				realtime_packet_buffer,
+				packet.packet_header.sequence,
+				fragment,
+				allocator,
+			) or_return
 		} else {
 			// TODO(Thomas): This is a complete Realtime packet, do that processing here
 		}
