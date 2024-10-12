@@ -57,18 +57,28 @@ Packet :: struct {
 	data:          []u8,
 }
 
-Realtime_Packet :: struct {
+// TODO(Thomas): Think about packing this more thightly
+Realtime_Packet_Header :: struct {
 	packet_type: i32,
 	data_length: u32,
 	is_fragment: bool,
-	data:        []u8,
 }
 
-Fragment :: struct {
+Realtime_Packet :: struct {
+	realtime_packet_header: Realtime_Packet_Header,
+	data:                   []u8,
+}
+
+// TODO(Thomas): Make the fragment_size u16 instead
+Fragment_Header :: struct {
 	fragment_size: u32,
 	fragment_id:   u8,
 	num_fragments: u8,
-	data:          []u8,
+}
+
+Fragment :: struct {
+	fragment_header: Fragment_Header,
+	data:            []u8,
 }
 
 Fragment_Entry :: struct {
@@ -134,21 +144,32 @@ serialize_packet :: proc(bit_writer: ^Bit_Writer, packet: Packet) -> bool {
 }
 
 @(require_results)
-serialize_realtime_packet :: proc(
+serialize_realtime_packet_header :: proc(
 	bit_writer: ^Bit_Writer,
-	realtime_packet: Realtime_Packet,
+	realtime_packet_header: Realtime_Packet_Header,
 ) -> bool {
 	// NOTE(Thomas): This len(Packet_Type) - 1 trick only works if 
 	// there is more than one variant in the Packet_Type enum
 	write_bits(
 		bit_writer,
-		u32(realtime_packet.packet_type),
+		u32(realtime_packet_header.packet_type),
 		len(Realtime_Packet_Type) - 1,
 	) or_return
 
-	serialize_u32(bit_writer, realtime_packet.data_length) or_return
+	serialize_u32(bit_writer, realtime_packet_header.data_length) or_return
 
-	serialize_bool(bit_writer, realtime_packet.is_fragment) or_return
+	serialize_bool(bit_writer, realtime_packet_header.is_fragment) or_return
+
+	return true
+}
+
+@(require_results)
+serialize_realtime_packet :: proc(
+	bit_writer: ^Bit_Writer,
+	realtime_packet: Realtime_Packet,
+) -> bool {
+
+	serialize_realtime_packet_header(bit_writer, realtime_packet.realtime_packet_header) or_return
 
 	// Ensure we're aligned with next byte boundary
 	serialize_align(bit_writer) or_return
@@ -159,10 +180,21 @@ serialize_realtime_packet :: proc(
 }
 
 @(require_results)
+serialize_fragment_header :: proc(
+	bit_writer: ^Bit_Writer,
+	fragment_header: Fragment_Header,
+) -> bool {
+	serialize_u32(bit_writer, fragment_header.fragment_size) or_return
+	serialize_u8(bit_writer, fragment_header.fragment_id) or_return
+	serialize_u8(bit_writer, fragment_header.num_fragments) or_return
+
+	return true
+}
+
+@(require_results)
 serialize_fragment :: proc(bit_writer: ^Bit_Writer, fragment: Fragment) -> bool {
-	serialize_u32(bit_writer, fragment.fragment_size) or_return
-	serialize_u8(bit_writer, fragment.fragment_id) or_return
-	serialize_u8(bit_writer, fragment.num_fragments) or_return
+
+	serialize_fragment_header(bit_writer, fragment.fragment_header) or_return
 
 	// Ensure we're aligned with next byte boundary
 	serialize_align(bit_writer) or_return
@@ -246,6 +278,37 @@ deserialize_packet :: proc(
 }
 
 @(require_results)
+deserialize_realtime_packet_header :: proc(
+	bit_reader: ^Bit_Reader,
+) -> (
+	Realtime_Packet_Header,
+	bool,
+) {
+
+	packet_type, packet_type_ok := read_bits(bit_reader, len(Realtime_Packet_Type) - 1)
+	if !packet_type_ok {
+		return Realtime_Packet_Header{}, false
+	}
+
+	data_length, data_length_ok := deserialize_u32(bit_reader)
+	if !data_length_ok {
+		return Realtime_Packet_Header{}, false
+	}
+
+	is_fragment, is_fragment_ok := deserialize_bool(bit_reader)
+	if !is_fragment_ok {
+		return Realtime_Packet_Header{}, false
+	}
+
+	return Realtime_Packet_Header {
+			packet_type = i32(packet_type),
+			data_length = data_length,
+			is_fragment = is_fragment,
+		},
+		true
+}
+
+@(require_results)
 deserialize_realtime_packet :: proc(
 	bit_reader: ^Bit_Reader,
 	allocator: runtime.Allocator,
@@ -254,18 +317,11 @@ deserialize_realtime_packet :: proc(
 	bool,
 ) {
 
-	packet_type, packet_type_ok := read_bits(bit_reader, len(Realtime_Packet_Type) - 1)
-	if !packet_type_ok {
-		return Realtime_Packet{}, false
-	}
+	realtime_packet_header, realtime_packet_header_ok := deserialize_realtime_packet_header(
+		bit_reader,
+	)
 
-	data_length, data_length_ok := deserialize_u32(bit_reader)
-	if !data_length_ok {
-		return Realtime_Packet{}, false
-	}
-
-	is_fragment, is_fragment_ok := deserialize_bool(bit_reader)
-	if !is_fragment_ok {
+	if !realtime_packet_header_ok {
 		return Realtime_Packet{}, false
 	}
 
@@ -273,18 +329,38 @@ deserialize_realtime_packet :: proc(
 		return Realtime_Packet{}, false
 	}
 
-	data := make([]u8, data_length, allocator)
+	data := make([]u8, realtime_packet_header.data_length, allocator)
 
 	data_ok := read_bytes(bit_reader, data, u32(len(data)))
 	if !data_ok {
 		return Realtime_Packet{}, false
 	}
 
-	return Realtime_Packet {
-			packet_type = i32(packet_type),
-			data_length = data_length,
-			is_fragment = is_fragment,
-			data = data,
+	return Realtime_Packet{realtime_packet_header = realtime_packet_header, data = data}, true
+}
+
+@(require_results)
+deserialize_fragment_header :: proc(bit_reader: ^Bit_Reader) -> (Fragment_Header, bool) {
+
+	fragment_size, fragment_size_ok := deserialize_u32(bit_reader)
+	if !fragment_size_ok {
+		return Fragment_Header{}, false
+	}
+
+	fragment_id, fragment_id_ok := deserialize_u8(bit_reader)
+	if !fragment_id_ok {
+		return Fragment_Header{}, false
+	}
+
+	num_fragments, num_fragments_ok := deserialize_u8(bit_reader)
+	if !num_fragments_ok {
+		return Fragment_Header{}, false
+	}
+
+	return Fragment_Header {
+			fragment_size = fragment_size,
+			fragment_id = fragment_id,
+			num_fragments = num_fragments,
 		},
 		true
 }
@@ -298,18 +374,8 @@ deserialize_fragment :: proc(
 	bool,
 ) {
 
-	fragment_size, fragment_size_ok := deserialize_u32(bit_reader)
-	if !fragment_size_ok {
-		return Fragment{}, false
-	}
-
-	fragment_id, fragment_id_ok := deserialize_u8(bit_reader)
-	if !fragment_id_ok {
-		return Fragment{}, false
-	}
-
-	num_fragments, num_fragments_ok := deserialize_u8(bit_reader)
-	if !num_fragments_ok {
+	fragment_header, fragment_header_ok := deserialize_fragment_header(bit_reader)
+	if !fragment_header_ok {
 		return Fragment{}, false
 	}
 
@@ -317,19 +383,13 @@ deserialize_fragment :: proc(
 		return Fragment{}, false
 	}
 
-	data := make([]u8, fragment_size, allocator)
+	data := make([]u8, fragment_header.fragment_size, allocator)
 	data_ok := read_bytes(bit_reader, data, u32(len(data)))
 	if !data_ok {
 		return Fragment{}, false
 	}
 
-	return Fragment {
-			fragment_size = fragment_size,
-			fragment_id = u8(fragment_id),
-			num_fragments = u8(num_fragments),
-			data = data,
-		},
-		true
+	return Fragment{fragment_header = fragment_header, data = data}, true
 }
 
 @(require_results)
@@ -358,25 +418,34 @@ process_fragment :: proc(
 ) -> bool {
 	assert(len(fragment.data) > 0)
 	assert(len(fragment.data) <= MAX_FRAGMENT_SIZE)
-	assert(fragment.fragment_size > 0)
-	assert(fragment.fragment_size <= MAX_FRAGMENT_SIZE)
+	assert(fragment.fragment_header.fragment_size > 0)
+	assert(fragment.fragment_header.fragment_size <= MAX_FRAGMENT_SIZE)
 
 	index := get_sequence_index(sequence)
 
 	// This is the first fragment we've gotten for this sequence number
 	if realtime_packet_buffer.entries[index].sequence == ENTRY_SENTINEL_VALUE {
 
+		// TODO(Thomas): Think more about this
 		data: [][]u8 = make([][]u8, MAX_FRAGMENTS_PER_PACKET, allocator)
 
-		data[fragment.fragment_id] = make([]u8, fragment.fragment_size, allocator)
+		data[fragment.fragment_header.fragment_id] = make(
+			[]u8,
+			fragment.fragment_header.fragment_size,
+			allocator,
+		)
 
-		mem.copy(&data[fragment.fragment_id][0], &fragment.data[0], len(fragment.data))
+		mem.copy(
+			&data[fragment.fragment_header.fragment_id][0],
+			&fragment.data[0],
+			len(fragment.data),
+		)
 
 		realtime_packet_buffer.entries[index] = Realtime_Packet_Entry {
 			packet_type = packet_type,
 			sequence = u32(sequence),
 			entry = Fragment_Entry {
-				num_fragments = fragment.num_fragments,
+				num_fragments = fragment.fragment_header.num_fragments,
 				received_fragments = 1,
 				fragments = data,
 			},
@@ -389,15 +458,15 @@ process_fragment :: proc(
 		fragment_entry := &realtime_packet_buffer.entries[index].entry.(Fragment_Entry)
 		assert(fragment_entry != nil)
 
-		fragment_entry.fragments[fragment.fragment_id] = make(
+		fragment_entry.fragments[fragment.fragment_header.fragment_id] = make(
 			[]u8,
-			fragment.fragment_size,
+			fragment.fragment_header.fragment_size,
 			allocator,
 		)
 		fragment_entry.received_fragments += 1
 
 		mem.copy(
-			&fragment_entry.fragments[fragment.fragment_id][0],
+			&fragment_entry.fragments[fragment.fragment_header.fragment_id][0],
 			&fragment.data[0],
 			len(fragment.data),
 		)
@@ -450,7 +519,7 @@ process_packet :: proc(
 			return false
 		}
 
-		if realtime_packet.is_fragment {
+		if realtime_packet.realtime_packet_header.is_fragment {
 			fragment, fragment_ok := deserialize_fragment(&reader, allocator)
 			if !fragment_ok {
 				return false
@@ -460,7 +529,7 @@ process_packet :: proc(
 			process_fragment(
 				realtime_packet_buffer,
 				packet.packet_header.sequence,
-				Realtime_Packet_Type(realtime_packet.packet_type),
+				Realtime_Packet_Type(realtime_packet.realtime_packet_header.packet_type),
 				fragment,
 				allocator,
 			) or_return
@@ -511,9 +580,9 @@ split_packet_into_fragments :: proc(
 
 		mem.copy(&fragment.data[0], &packet_data[i * fragment_size], fragment_size)
 
-		fragment.fragment_size = u32(fragment_size)
-		fragment.fragment_id = u8(i)
-		fragment.num_fragments = u8(num_fragments)
+		fragment.fragment_header.fragment_size = u32(fragment_size)
+		fragment.fragment_header.fragment_id = u8(i)
+		fragment.fragment_header.num_fragments = u8(num_fragments)
 	}
 
 	return fragments
@@ -545,18 +614,24 @@ compare_packet :: proc(packet_a: Packet, packet_b: Packet) -> bool {
 
 @(require_results)
 compare_realtime_packet :: proc(packet_a: Realtime_Packet, packet_b: Realtime_Packet) -> bool {
-	equal_packet_type := packet_a.packet_type == packet_b.packet_type
-	equal_data_length := packet_a.data_length == packet_b.data_length
-	equal_is_fragment := packet_a.is_fragment == packet_b.is_fragment
+	equal_packet_type :=
+		packet_a.realtime_packet_header.packet_type == packet_b.realtime_packet_header.packet_type
+	equal_data_length :=
+		packet_a.realtime_packet_header.data_length == packet_b.realtime_packet_header.data_length
+	equal_is_fragment :=
+		packet_a.realtime_packet_header.is_fragment == packet_b.realtime_packet_header.is_fragment
 	equal_data := bytes.compare(packet_a.data, packet_b.data) == 0
 	return equal_packet_type && equal_data_length && equal_is_fragment && equal_data
 }
 
 @(require_results)
 compare_fragment :: proc(fragment_a: Fragment, fragment_b: Fragment) -> bool {
-	equal_fragment_size := fragment_a.fragment_size == fragment_b.fragment_size
-	equal_fragment_id := fragment_a.fragment_id == fragment_b.fragment_id
-	equal_num_fragments := fragment_a.num_fragments == fragment_b.num_fragments
+	equal_fragment_size :=
+		fragment_a.fragment_header.fragment_size == fragment_b.fragment_header.fragment_size
+	equal_fragment_id :=
+		fragment_a.fragment_header.fragment_id == fragment_b.fragment_header.fragment_id
+	equal_num_fragments :=
+		fragment_a.fragment_header.num_fragments == fragment_b.fragment_header.num_fragments
 	equal_data := bytes.compare(fragment_a.data, fragment_b.data) == 0
 	return equal_fragment_size && equal_fragment_id && equal_num_fragments && equal_data
 
@@ -647,10 +722,12 @@ test_serialize_deserialize_realtime_packet :: proc(t: ^testing.T) {
 	}
 
 	realtime_packet := Realtime_Packet {
-		packet_type = i32(Realtime_Packet_Type.Test_A),
-		data_length = u32(len(data)),
-		is_fragment = false,
-		data        = data,
+		realtime_packet_header = Realtime_Packet_Header {
+			packet_type = i32(Realtime_Packet_Type.Test_A),
+			data_length = u32(len(data)),
+			is_fragment = false,
+		},
+		data = data,
 	}
 
 	testing.expectf(
@@ -690,10 +767,12 @@ test_serialize_deserialize_fragment :: proc(t: ^testing.T) {
 	}
 
 	fragment := Fragment {
-		fragment_size = u32(len(data)),
-		fragment_id   = 14,
-		num_fragments = 53,
-		data          = data,
+		fragment_header = Fragment_Header {
+			fragment_size = u32(len(data)),
+			fragment_id = 14,
+			num_fragments = 53,
+		},
+		data = data,
 	}
 
 	testing.expectf(
@@ -741,7 +820,7 @@ test_split_packet_into_one_fragment_exact :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(fragments), 1)
 	for fragment in fragments {
-		testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+		testing.expect_value(t, fragment.fragment_header.fragment_size, MAX_FRAGMENT_SIZE)
 	}
 }
 
@@ -756,7 +835,7 @@ test_split_packet_into_fragments_exact :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(fragments), packet_size / MAX_FRAGMENT_SIZE)
 	for fragment in fragments {
-		testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+		testing.expect_value(t, fragment.fragment_header.fragment_size, MAX_FRAGMENT_SIZE)
 	}
 }
 
@@ -773,9 +852,9 @@ test_split_packet_into_fragments_one_remainder :: proc(t: ^testing.T) {
 
 	for fragment, i in fragments {
 		if i == len(fragments) - 1 {
-			testing.expect_value(t, fragment.fragment_size, 1)
+			testing.expect_value(t, fragment.fragment_header.fragment_size, 1)
 		} else {
-			testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+			testing.expect_value(t, fragment.fragment_header.fragment_size, MAX_FRAGMENT_SIZE)
 		}
 	}
 }
@@ -827,10 +906,10 @@ test_serialize_split_and_reassemble_and_deserialize_test_packet :: proc(t: ^test
 	fragment_data_buffer := make([]u8, 2048 * size_of(u32), context.temp_allocator)
 
 	for fragment in fragments {
-		testing.expect_value(t, fragment.fragment_size, MAX_FRAGMENT_SIZE)
+		testing.expect_value(t, fragment.fragment_header.fragment_size, MAX_FRAGMENT_SIZE)
 
 		mem.copy(
-			&fragment_data_buffer[int(fragment.fragment_id) * MAX_FRAGMENT_SIZE],
+			&fragment_data_buffer[int(fragment.fragment_header.fragment_id) * MAX_FRAGMENT_SIZE],
 			&fragment.data[0],
 			len(fragment.data),
 		)
@@ -858,11 +937,15 @@ test_process_fragment :: proc(t: ^testing.T) {
 
 	sequence: u16 = 0
 	fragment_id: u8 = 0
+	num_fragments: u8 = 1
 
 	fragment := Fragment {
-		fragment_id   = fragment_id,
-		fragment_size = MAX_FRAGMENT_SIZE,
-		data          = fragment_data,
+		fragment_header = Fragment_Header {
+			fragment_size = MAX_FRAGMENT_SIZE,
+			fragment_id = fragment_id,
+			num_fragments = num_fragments,
+		},
+		data = fragment_data,
 	}
 
 
@@ -927,4 +1010,149 @@ test_process_multiple_fragments :: proc(t: ^testing.T) {
 			)
 		}
 	}
+}
+
+@(test)
+test_process_packet :: proc(t: ^testing.T) {
+	realtime_packet_buffer := new(Realtime_Packet_Buffer, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+	init_realtime_packet_buffer(realtime_packet_buffer)
+	sequence: u32 = 0
+
+	test_packet := random_test_packet_b()
+
+	writer_buffer := make([]u32, 2048, context.temp_allocator)
+	writer := create_writer(writer_buffer)
+
+	testing.expectf(
+		t,
+		serialize_test_packet_b(&writer, test_packet),
+		"serialize_test_packet should be successful",
+	)
+
+	testing.expectf(t, flush_bits(&writer), "flush_bits should be successful")
+
+	fragments := split_packet_into_fragments(
+		u16(sequence),
+		convert_word_slice_to_byte_slice(writer.buffer),
+		context.temp_allocator,
+	)
+
+	num_fragments := len(fragments)
+	testing.expect_value(t, num_fragments, 8)
+
+	// Steps
+	// Serialize all fragments into buffer
+	// Make Realtime_Packet and serialize into buffer
+	// Make Top level packet and serialize into buffer
+	// Process packet
+
+
+	//for fragment in fragments {
+	//	fragment_writer_buffer := make(
+	//		[]u32,
+	//		(FRAGMENT_HEADER_SIZE + MAX_FRAGMENT_SIZE) / size_of(u32),
+	//		context.temp_allocator,
+	//	)
+
+	//	fragment_writer := create_writer(fragment_writer_buffer)
+
+	//	testing.expectf(
+	//		t,
+	//		serialize_fragment(&fragment_writer, fragment),
+	//		"serializing_fragment_packet should be successful",
+	//	)
+
+	//	testing.expectf(t, flush_bits(&fragment_writer), "flush_bits should be successful")
+
+	//	testing.expectf(
+	//		t,
+	//		process_packet(
+	//			realtime_packet_buffer,
+	//			convert_word_slice_to_byte_slice(fragment_writer_buffer),
+	//			context.temp_allocator,
+	//		),
+	//		"process_packet should be successful",
+	//	)
+
+	//}
+
+	// ----------------- OLD --------------------------
+
+	//for fragment in fragments {
+	//	fragment_writer_buffer := make(
+	//		[]u32,
+	//		(FRAGMENT_PACKET_HEADER_SIZE + MAX_FRAGMENT_SIZE) / size_of(u32),
+	//		context.temp_allocator,
+	//	)
+
+	//	fragment_writer := create_writer(fragment_writer_buffer)
+
+	//	testing.expectf(
+	//		t,
+	//		serialize_fragment_packet(&fragment_writer, fragment),
+	//		"serializing_fragment_packet should be successful",
+	//	)
+
+	//	testing.expectf(t, flush_bits(&fragment_writer), "flush_bits should be successful")
+
+	//	testing.expectf(
+	//		t,
+	//		process_packet(
+	//			realtime_packet_buffer,
+	//			convert_word_slice_to_byte_slice(fragment_writer_buffer),
+	//		),
+	//		"process_packet should be successful",
+	//	)
+	//}
+
+	//	// Reassemble all the fragment data into a single buffer
+	//	reassembled_test_packet_data := make([]u8, 2048 * size_of(u32))
+	//	defer delete(reassembled_test_packet_data)
+	//	for frag_idx in 0 ..< num_fragments {
+	//		mem.copy(
+	//			&reassembled_test_packet_data[frag_idx * MAX_FRAGMENT_SIZE],
+	//			&realtime_packet_buffer.entries[0].fragments[frag_idx][0],
+	//			MAX_FRAGMENT_SIZE,
+	//		)
+	//	}
+	//	reassembled_test_packet_reader := create_reader(
+	//		convert_byte_slice_to_word_slice(reassembled_test_packet_data),
+	//	)
+	//
+	//	des_test_packet, des_test_packet_ok := deserialize_test_packet_b(
+	//		&reassembled_test_packet_reader,
+	//	)
+	//
+	//	testing.expectf(
+	//		t,
+	//		des_test_packet_ok,
+	//		"deseriaize_test_packet should be successful",
+	//	)
+	//
+	//	testing.expect_value(t, des_test_packet, test_packet)
+	//
+	//	// assert state of the Sequence_Buffer
+	//	testing.expect_value(t, realtime_packet_buffer.current_sequence, sequence)
+	//	for seq, i in realtime_packet_buffer.sequence {
+	//		if i == 0 {
+	//			testing.expect_value(t, seq, sequence)
+	//		} else {
+	//			testing.expect_value(t, seq, ENTRY_SENTINEL_VALUE)
+	//		}
+	//	}
+	//
+	//	for entry, i in realtime_packet_buffer.entries {
+	//		if i == int(sequence) {
+	//			testing.expect_value(t, entry.num_fragments, u8(num_fragments))
+	//			testing.expect_value(
+	//				t,
+	//				entry.received_fragments,
+	//				u8(num_fragments),
+	//			)
+	//		} else {
+	//			testing.expect_value(t, entry.num_fragments, 0)
+	//			testing.expect_value(t, entry.received_fragments, 0)
+	//		}
+	//	}
 }
