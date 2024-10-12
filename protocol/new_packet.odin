@@ -92,8 +92,8 @@ Packet_Buffer :: struct {
 }
 
 
-init_realtime_packet_buffer :: proc(realtime_packet_buffer: ^Packet_Buffer) {
-	for &entry in realtime_packet_buffer.entries {
+init_packet_buffer :: proc(packet_buffer: ^Packet_Buffer) {
+	for &entry in packet_buffer.entries {
 		entry.sequence = ENTRY_SENTINEL_VALUE
 	}
 }
@@ -305,7 +305,7 @@ deserialize_test_packet_b :: proc(bit_reader: ^Bit_Reader) -> (Test_Packet_B, bo
 
 
 process_fragment :: proc(
-	realtime_packet_buffer: ^Packet_Buffer,
+	packet_buffer: ^Packet_Buffer,
 	sequence: u16,
 	packet_type: Packet_Type,
 	fragment: Fragment,
@@ -319,7 +319,7 @@ process_fragment :: proc(
 	index := get_sequence_index(sequence)
 
 	// This is the first fragment we've gotten for this sequence number
-	if realtime_packet_buffer.entries[index].sequence == ENTRY_SENTINEL_VALUE {
+	if packet_buffer.entries[index].sequence == ENTRY_SENTINEL_VALUE {
 
 		// TODO(Thomas): Think more about this
 		data: [][]u8 = make([][]u8, MAX_FRAGMENTS_PER_PACKET, allocator)
@@ -336,7 +336,7 @@ process_fragment :: proc(
 			len(fragment.data),
 		)
 
-		realtime_packet_buffer.entries[index] = Packet_Entry {
+		packet_buffer.entries[index] = Packet_Entry {
 			packet_type = packet_type,
 			sequence = u32(sequence),
 			entry = Fragment_Entry {
@@ -346,11 +346,11 @@ process_fragment :: proc(
 			},
 		}
 
-		realtime_packet_buffer.entries[index].sequence = u32(sequence)
-		realtime_packet_buffer.current_sequence = u32(sequence)
+		packet_buffer.entries[index].sequence = u32(sequence)
+		packet_buffer.current_sequence = u32(sequence)
 	} else {
 
-		fragment_entry := &realtime_packet_buffer.entries[index].entry.(Fragment_Entry)
+		fragment_entry := &packet_buffer.entries[index].entry.(Fragment_Entry)
 		assert(fragment_entry != nil)
 
 		fragment_entry.fragments[fragment.fragment_header.fragment_id] = make(
@@ -366,8 +366,8 @@ process_fragment :: proc(
 			len(fragment.data),
 		)
 
-		realtime_packet_buffer.entries[index].sequence = u32(sequence)
-		realtime_packet_buffer.current_sequence = u32(sequence)
+		packet_buffer.entries[index].sequence = u32(sequence)
+		packet_buffer.current_sequence = u32(sequence)
 	}
 
 	return true
@@ -375,7 +375,7 @@ process_fragment :: proc(
 
 @(require_results)
 process_packet :: proc(
-	realtime_packet_buffer: ^Packet_Buffer,
+	packet_buffer: ^Packet_Buffer,
 	data: []u8,
 	allocator: runtime.Allocator,
 ) -> bool {
@@ -425,7 +425,7 @@ process_packet :: proc(
 
 			// TODO(Thomas): Pass in the same allocator?
 			process_fragment(
-				realtime_packet_buffer,
+				packet_buffer,
 				packet.packet_header.sequence,
 				Packet_Type(packet.packet_header.packet_type),
 				fragment,
@@ -634,17 +634,17 @@ test_serialize_deserialize_fragment :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_init_realtime_packet_buffer :: proc(t: ^testing.T) {
-	realtime_packet_buffer, err := new(Packet_Buffer)
+test_init_packet_buffer :: proc(t: ^testing.T) {
+	packet_buffer, err := new(Packet_Buffer)
 	assert(err == nil)
-	defer free(realtime_packet_buffer)
-	for entry in realtime_packet_buffer.entries {
+	defer free(packet_buffer)
+	for entry in packet_buffer.entries {
 		testing.expect_value(t, entry.sequence, 0)
 	}
 
-	init_realtime_packet_buffer(realtime_packet_buffer)
+	init_packet_buffer(packet_buffer)
 
-	for entry in realtime_packet_buffer.entries {
+	for entry in packet_buffer.entries {
 		testing.expect_value(t, entry.sequence, ENTRY_SENTINEL_VALUE)
 	}
 }
@@ -764,9 +764,9 @@ test_serialize_split_and_reassemble_and_deserialize_test_packet :: proc(t: ^test
 
 @(test)
 test_process_fragment :: proc(t: ^testing.T) {
-	realtime_packet_buffer := new(Packet_Buffer, context.temp_allocator)
+	packet_buffer := new(Packet_Buffer, context.temp_allocator)
 	defer free_all(context.temp_allocator)
-	init_realtime_packet_buffer(realtime_packet_buffer)
+	init_packet_buffer(packet_buffer)
 
 	fragment_data := make([]u8, MAX_FRAGMENT_SIZE, context.temp_allocator)
 
@@ -791,7 +791,7 @@ test_process_fragment :: proc(t: ^testing.T) {
 	testing.expectf(
 		t,
 		process_fragment(
-			realtime_packet_buffer,
+			packet_buffer,
 			sequence,
 			Packet_Type.Test_B,
 			fragment,
@@ -800,7 +800,7 @@ test_process_fragment :: proc(t: ^testing.T) {
 		"processing fragment packet should be successful",
 	)
 
-	fragment_entry := realtime_packet_buffer.entries[sequence].entry.(Fragment_Entry)
+	fragment_entry := packet_buffer.entries[sequence].entry.(Fragment_Entry)
 
 	for i in 0 ..< len(fragment_entry.fragments[0]) {
 		testing.expect_value(t, fragment_entry.fragments[0][i], fragment_data[i])
@@ -809,10 +809,10 @@ test_process_fragment :: proc(t: ^testing.T) {
 
 @(test)
 test_process_multiple_fragments :: proc(t: ^testing.T) {
-	realtime_packet_buffer := new(Packet_Buffer, context.temp_allocator)
+	packet_buffer := new(Packet_Buffer, context.temp_allocator)
 	defer free_all(context.temp_allocator)
 
-	init_realtime_packet_buffer(realtime_packet_buffer)
+	init_packet_buffer(packet_buffer)
 
 	num_fragments := 8
 	packet_data := make([]u8, num_fragments * MAX_FRAGMENT_SIZE, context.temp_allocator)
@@ -829,7 +829,7 @@ test_process_multiple_fragments :: proc(t: ^testing.T) {
 		testing.expectf(
 			t,
 			process_fragment(
-				realtime_packet_buffer,
+				packet_buffer,
 				sequence,
 				Packet_Type.Test_B,
 				fragment,
@@ -839,7 +839,7 @@ test_process_multiple_fragments :: proc(t: ^testing.T) {
 		)
 	}
 
-	fragment_entry := realtime_packet_buffer.entries[sequence].entry.(Fragment_Entry)
+	fragment_entry := packet_buffer.entries[sequence].entry.(Fragment_Entry)
 	for frag_idx in 0 ..< num_fragments {
 		for i in 0 ..< len(fragment_entry.fragments[frag_idx]) {
 			testing.expect_value(
@@ -853,9 +853,9 @@ test_process_multiple_fragments :: proc(t: ^testing.T) {
 
 @(test)
 test_process_packet :: proc(t: ^testing.T) {
-	realtime_packet_buffer := new(Packet_Buffer, context.temp_allocator)
+	packet_buffer := new(Packet_Buffer, context.temp_allocator)
 	defer free_all(context.temp_allocator)
-	init_realtime_packet_buffer(realtime_packet_buffer)
+	init_packet_buffer(packet_buffer)
 	sequence: u32 = 0
 
 	test_packet := random_test_packet_b()
