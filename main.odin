@@ -253,6 +253,9 @@ main :: proc() {
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
+	realtime_packet_buffer := proto.Realtime_Packet_Buffer{}
+	proto.init_realtime_packet_buffer(&realtime_packet_buffer)
+
 	//send_memory := make([]u8, 10_000_000)
 	//defer delete(send_memory)
 	//send_arena := mem.Arena{}
