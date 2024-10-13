@@ -256,6 +256,72 @@ main :: proc() {
 	packet_buffer := proto.Packet_Buffer{}
 	proto.init_packet_buffer(&packet_buffer)
 
+	lo: f32 = -1000
+	hi: f32 = 1000
+
+	test_packet := proto.random_test_packet(lo, hi)
+
+	// 2048 size_of(u32) == 8192 bytes is the worst case size of the test packet
+	test_packet_writer_buffer := make([]u32, 2048, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+	test_packet_writer := proto.create_writer(test_packet_writer_buffer)
+	assert(proto.serialize_test_packet(&test_packet_writer, test_packet))
+	assert(proto.flush_bits(&test_packet_writer))
+
+	packet_data_size := proto.get_writer_bytes_written(test_packet_writer)
+	log.info("packet_data_size: ", packet_data_size)
+	if packet_data_size > proto.MTU {
+		// split
+		log.info("splitting into fragments")
+
+
+	} else {
+		// We have the serialized bytes, make packet
+		packet_writer_buffer := make(
+			[]u32,
+			(size_of(proto.Packet_Header) + packet_data_size) / size_of(u32),
+			context.temp_allocator,
+		)
+
+		packet_writer := proto.create_writer(packet_writer_buffer)
+
+		packet_type: proto.Packet_Type
+		switch packet in test_packet {
+		case proto.Test_Packet_A:
+			packet_type = proto.Packet_Type.Test_A
+		case proto.Test_Packet_B:
+			packet_type = proto.Packet_Type.Test_B
+		case proto.Test_Packet_C:
+			packet_type = proto.Packet_Type.Test_C
+		}
+
+		packet_header := proto.Packet_Header {
+			crc32       = 42,
+			packet_type = u32(packet_type),
+			data_length = u32(packet_data_size),
+
+			// TODO(Thomas): Need a way to get the actual sequence, probably from calling a procedure like
+			// advance_sequence(packet_buffer)
+			sequence    = 0,
+			is_fragment = false,
+		}
+
+		assert(
+			proto.serialize_packet_from_header_and_byte_slice(
+				&packet_writer,
+				packet_header,
+				proto.convert_word_slice_to_byte_slice(
+					test_packet_writer.buffer[0:packet_data_size / size_of(u32)],
+				),
+			),
+		)
+
+		assert(proto.flush_bits(&packet_writer))
+
+		// Ready to send
+	}
+
+
 	//send_memory := make([]u8, 10_000_000)
 	//defer delete(send_memory)
 	//send_arena := mem.Arena{}

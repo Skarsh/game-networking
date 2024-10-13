@@ -18,6 +18,8 @@ MAX_ENTRIES :: 256
 // by 16 bit sequence numbers.
 ENTRY_SENTINEL_VALUE :: 0xFFFF_FFFF
 
+// TODO(Thomas): Add another test packet type that is accumulating size, e.g.
+// [dynamic]u8 so that sometimes its smaller than MTU and sometimes its larger.
 Test_Packet_A :: struct {
 	a: i32,
 	b: i32,
@@ -34,12 +36,19 @@ Test_Packet_C :: struct {
 	velocity: Vector3,
 }
 
+Test_Packet :: union {
+	Test_Packet_A,
+	Test_Packet_B,
+	Test_Packet_C,
+}
+
 Packet_Type :: enum {
 	Test_A,
 	Test_B,
 	Test_C,
 	Chunk,
 }
+
 
 Packet_Header :: struct {
 	crc32:       u32,
@@ -193,6 +202,20 @@ serialize_test_packet_b :: proc(bit_writer: ^Bit_Writer, test_packet: Test_Packe
 serialize_test_packet_c :: proc(bit_writer: ^Bit_Writer, test_packet: Test_Packet_C) -> bool {
 	serialize_vector3(bit_writer, test_packet.position) or_return
 	serialize_vector3(bit_writer, test_packet.velocity) or_return
+
+	return true
+}
+
+@(require_results)
+serialize_test_packet :: proc(bit_writer: ^Bit_Writer, test_packet: Test_Packet) -> bool {
+	switch packet in test_packet {
+	case Test_Packet_A:
+		serialize_test_packet_a(bit_writer, packet) or_return
+	case Test_Packet_B:
+		serialize_test_packet_b(bit_writer, packet) or_return
+	case Test_Packet_C:
+		serialize_test_packet_c(bit_writer, packet) or_return
+	}
 
 	return true
 }
@@ -637,6 +660,35 @@ random_test_packet_c :: proc(lo: f32, hi: f32) -> Test_Packet_C {
 	position := random_vector3(lo, hi)
 	velocity := random_vector3(lo, hi)
 	return Test_Packet_C{position = position, velocity = velocity}
+}
+
+random_test_packet :: proc(lo: f32, hi: f32) -> Test_Packet {
+	info := type_info_of(Test_Packet)
+	variants_len := 0
+
+	#partial switch v in info.variant {
+	case runtime.Type_Info_Named:
+		#partial switch vv in v.base.variant {
+		case runtime.Type_Info_Union:
+			variants_len = len(vv.variants)
+		case:
+			unreachable()
+		}
+	case:
+		unreachable()
+	}
+
+	random := rand.int_max(variants_len)
+	switch random {
+	case 0:
+		return random_test_packet_a()
+	case 1:
+		return random_test_packet_b()
+	case 2:
+		return random_test_packet_c(lo, hi)
+	case:
+		unreachable()
+	}
 }
 
 @(require_results)
