@@ -274,6 +274,74 @@ main :: proc() {
 		// split
 		log.info("splitting into fragments")
 
+		fragments := proto.split_packet_into_fragments(
+			u16(packet_buffer.current_sequence),
+			proto.convert_word_slice_to_byte_slice(test_packet_writer.buffer),
+			context.temp_allocator,
+		)
+
+		num_fragments := len(fragments)
+		assert(num_fragments == 8)
+
+		for fragment in fragments {
+			packet_data_size := (size_of(proto.Fragment_Header) + proto.MAX_FRAGMENT_SIZE)
+			fragment_writer_buffer := make(
+				[]u32,
+				packet_data_size / size_of(u32),
+				context.temp_allocator,
+			)
+
+			fragment_writer := proto.create_writer(fragment_writer_buffer)
+
+			assert(proto.serialize_fragment(&fragment_writer, fragment))
+
+			assert(proto.flush_bits(&fragment_writer))
+
+			packet_writer_buffer := make(
+				[]u32,
+				(size_of(proto.Packet_Header) + packet_data_size) / size_of(u32),
+				context.temp_allocator,
+			)
+
+			packet_writer := proto.create_writer(packet_writer_buffer)
+
+			packet_type: proto.Packet_Type
+			switch packet in test_packet {
+			case proto.Test_Packet_A:
+				packet_type = proto.Packet_Type.Test_A
+			case proto.Test_Packet_B:
+				packet_type = proto.Packet_Type.Test_B
+			case proto.Test_Packet_C:
+				packet_type = proto.Packet_Type.Test_C
+			}
+
+			packet_header := proto.Packet_Header {
+				crc32       = 42,
+				packet_type = u32(packet_type),
+				data_length = u32(packet_data_size),
+				sequence    = 0,
+				is_fragment = true,
+			}
+
+			assert(
+				proto.serialize_packet_from_header_and_byte_slice(
+					&packet_writer,
+					packet_header,
+					proto.convert_word_slice_to_byte_slice(fragment_writer.buffer),
+				),
+			)
+
+			assert(proto.flush_bits(&packet_writer))
+
+			assert(
+				proto.process_packet(
+					&packet_buffer,
+					proto.convert_word_slice_to_byte_slice(packet_writer.buffer),
+					context.temp_allocator,
+				),
+			)
+		}
+
 
 	} else {
 		// We have the serialized bytes, make packet
