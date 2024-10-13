@@ -30,8 +30,8 @@ Test_Packet_B :: struct {
 }
 
 Test_Packet_C :: struct {
-	velocity: Vector3,
 	position: Vector3,
+	velocity: Vector3,
 }
 
 Packet_Type :: enum {
@@ -172,12 +172,27 @@ serialize_fragment :: proc(bit_writer: ^Bit_Writer, fragment: Fragment) -> bool 
 }
 
 @(require_results)
+serialize_test_packet_a :: proc(bit_writer: ^Bit_Writer, test_packet: Test_Packet_A) -> bool {
+	serialize_integer(bit_writer, test_packet.a, math.min(i32), math.max(i32)) or_return
+	serialize_integer(bit_writer, test_packet.b, math.min(i32), math.max(i32)) or_return
+	serialize_integer(bit_writer, test_packet.c, math.min(i32), math.max(i32)) or_return
+
+	return true
+}
+
+@(require_results)
 serialize_test_packet_b :: proc(bit_writer: ^Bit_Writer, test_packet: Test_Packet_B) -> bool {
 	for item in test_packet.items {
-		if !serialize_integer(bit_writer, item, math.min(i32), math.max(i32)) {
-			return false
-		}
+		serialize_integer(bit_writer, item, math.min(i32), math.max(i32)) or_return
 	}
+
+	return true
+}
+
+@(require_results)
+serialize_test_packet_c :: proc(bit_writer: ^Bit_Writer, test_packet: Test_Packet_C) -> bool {
+	serialize_vector3(bit_writer, test_packet.position) or_return
+	serialize_vector3(bit_writer, test_packet.velocity) or_return
 
 	return true
 }
@@ -309,6 +324,26 @@ deserialize_fragment :: proc(
 }
 
 @(require_results)
+deserialize_test_packet_a :: proc(bit_reader: ^Bit_Reader) -> (Test_Packet_A, bool) {
+	a, a_ok := deserialize_integer(bit_reader, math.min(i32), math.max(i32))
+	if !a_ok {
+		return Test_Packet_A{}, false
+	}
+
+	b, b_ok := deserialize_integer(bit_reader, math.min(i32), math.max(i32))
+	if !b_ok {
+		return Test_Packet_A{}, false
+	}
+
+	c, c_ok := deserialize_integer(bit_reader, math.min(i32), math.max(i32))
+	if !c_ok {
+		return Test_Packet_A{}, false
+	}
+
+	return Test_Packet_A{a = a, b = b, c = c}, true
+}
+
+@(require_results)
 deserialize_test_packet_b :: proc(bit_reader: ^Bit_Reader) -> (Test_Packet_B, bool) {
 	test_packet := Test_Packet_B{}
 	for i in 0 ..< len(test_packet.items) {
@@ -320,6 +355,22 @@ deserialize_test_packet_b :: proc(bit_reader: ^Bit_Reader) -> (Test_Packet_B, bo
 	}
 
 	return test_packet, true
+}
+
+@(require_results)
+deserialize_test_packet_c :: proc(bit_reader: ^Bit_Reader) -> (Test_Packet_C, bool) {
+	position, position_ok := deserialize_vector3(bit_reader)
+	if !position_ok {
+		return Test_Packet_C{}, false
+	}
+
+	velocity, velocity_ok := deserialize_vector3(bit_reader)
+	if !velocity_ok {
+
+		return Test_Packet_C{}, false
+	}
+
+	return Test_Packet_C{position = position, velocity = velocity}, true
 }
 
 // ------------- Processing procedures -------------
@@ -557,6 +608,22 @@ split_packet_into_fragments :: proc(
 
 // ------------- Utility procedures -------------
 
+// TODO(Thomas): This is duplicated from the serialization long running tests
+// should group all these utility procedures somewhere
+random_vector3 :: proc(lo: f32, hi: f32) -> Vector3 {
+	return Vector3 {
+		rand.float32_range(lo, hi),
+		rand.float32_range(lo, hi),
+		rand.float32_range(lo, hi),
+	}
+}
+
+random_test_packet_a :: proc() -> Test_Packet_A {
+	a := rand.int31()
+	b := rand.int31()
+	c := rand.int31()
+	return Test_Packet_A{a = a, b = b, c = c}
+}
 
 random_test_packet_b :: proc() -> Test_Packet_B {
 	test_packet := Test_Packet_B{}
@@ -564,6 +631,12 @@ random_test_packet_b :: proc() -> Test_Packet_B {
 		test_packet.items[i] = rand.int31()
 	}
 	return test_packet
+}
+
+random_test_packet_c :: proc(lo: f32, hi: f32) -> Test_Packet_C {
+	position := random_vector3(lo, hi)
+	velocity := random_vector3(lo, hi)
+	return Test_Packet_C{position = position, velocity = velocity}
 }
 
 @(require_results)
