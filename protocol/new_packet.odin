@@ -43,7 +43,7 @@ Packet_Type :: enum {
 
 Packet_Header :: struct {
 	crc32:       u32,
-	packet_type: i32,
+	packet_type: u32,
 	data_length: u32,
 	sequence:    u16,
 	is_fragment: bool,
@@ -116,6 +116,22 @@ serialize_packet_header :: proc(bit_writer: ^Bit_Writer, packet_header: Packet_H
 	return true
 }
 
+@(require_results)
+serialize_packet_from_header_and_byte_slice :: proc(
+	bit_writer: ^Bit_Writer,
+	packet_header: Packet_Header,
+	data: []u8,
+) -> bool {
+
+	serialize_packet_header(bit_writer, packet_header) or_return
+
+	// Ensure we're aligned with next byte boundary
+	write_align(bit_writer) or_return
+
+	write_bytes(bit_writer, data) or_return
+
+	return true
+}
 
 @(require_results)
 serialize_packet :: proc(bit_writer: ^Bit_Writer, packet: Packet) -> bool {
@@ -198,7 +214,7 @@ deserialize_packet_header :: proc(bit_reader: ^Bit_Reader) -> (Packet_Header, bo
 
 	return Packet_Header {
 			crc32 = crc32,
-			packet_type = i32(packet_type),
+			packet_type = u32(packet_type),
 			data_length = data_length,
 			sequence = u16(sequence),
 			is_fragment = is_fragment,
@@ -284,7 +300,12 @@ deserialize_fragment :: proc(
 		return Fragment{}, false
 	}
 
-	return Fragment{fragment_header = fragment_header, data = data}, true
+	fragment := Fragment {
+		fragment_header = fragment_header,
+		data            = data,
+	}
+
+	return fragment, true
 }
 
 @(require_results)
@@ -393,9 +414,9 @@ process_packet :: proc(
 	}
 
 	words := convert_byte_slice_to_word_slice(data)
-	reader := create_reader(words)
+	packet_reader := create_reader(words)
 
-	packet, packet_ok := deserialize_packet(&reader, allocator)
+	packet, packet_ok := deserialize_packet(&packet_reader, allocator)
 	if !packet_ok {
 		return false
 	}
@@ -417,8 +438,11 @@ process_packet :: proc(
 	case .Test_B:
 		// This will be larger than MTU and hence fragmented
 		if packet.packet_header.is_fragment {
+			// NOTE(Thomas): Need to create new reader here, or reset since if not
+			// the number of bits read will not match
+			fragment_reader := create_reader(convert_byte_slice_to_word_slice(packet.data))
 
-			fragment, fragment_ok := deserialize_fragment(&reader, allocator)
+			fragment, fragment_ok := deserialize_fragment(&fragment_reader, allocator)
 			if !fragment_ok {
 				return false
 			}
@@ -431,7 +455,6 @@ process_packet :: proc(
 				fragment,
 				allocator,
 			) or_return
-
 		}
 	case .Test_C:
 	// This is a complete packet, and always will be
@@ -510,15 +533,24 @@ compare_packet :: proc(packet_a: Packet, packet_b: Packet) -> bool {
 }
 
 @(require_results)
+compare_fragment_header :: proc(
+	fragment_header_a: Fragment_Header,
+	fragment_header_b: Fragment_Header,
+) -> bool {
+	equal_fragment_size := fragment_header_a.fragment_size == fragment_header_b.fragment_size
+	equal_fragment_id := fragment_header_a.fragment_id == fragment_header_b.fragment_id
+	equal_num_fragments := fragment_header_a.num_fragments == fragment_header_b.num_fragments
+	return equal_fragment_size && equal_fragment_id && equal_num_fragments
+}
+
+@(require_results)
 compare_fragment :: proc(fragment_a: Fragment, fragment_b: Fragment) -> bool {
-	equal_fragment_size :=
-		fragment_a.fragment_header.fragment_size == fragment_b.fragment_header.fragment_size
-	equal_fragment_id :=
-		fragment_a.fragment_header.fragment_id == fragment_b.fragment_header.fragment_id
-	equal_num_fragments :=
-		fragment_a.fragment_header.num_fragments == fragment_b.fragment_header.num_fragments
+	equal_fragment_header := compare_fragment_header(
+		fragment_a.fragment_header,
+		fragment_b.fragment_header,
+	)
 	equal_data := bytes.compare(fragment_a.data, fragment_b.data) == 0
-	return equal_fragment_size && equal_fragment_id && equal_num_fragments && equal_data
+	return equal_fragment_header && equal_data
 
 }
 
@@ -533,7 +565,7 @@ test_serialize_deserialize_packet_header :: proc(t: ^testing.T) {
 
 	packet_header := Packet_Header {
 		crc32       = 72,
-		packet_type = i32(Packet_Type.Test_B),
+		packet_type = u32(Packet_Type.Test_B),
 		data_length = 14,
 		sequence    = 42,
 	}
@@ -569,7 +601,7 @@ test_serialize_deserialize_packet :: proc(t: ^testing.T) {
 
 	packet_header := Packet_Header {
 		crc32       = 72,
-		packet_type = i32(Packet_Type.Test_B),
+		packet_type = u32(Packet_Type.Test_B),
 		data_length = u32(len(data)),
 		sequence    = 42,
 	}
@@ -658,8 +690,10 @@ test_split_packet_into_one_fragment_exact :: proc(t: ^testing.T) {
 	fragments := split_packet_into_fragments(0, packet_data, context.temp_allocator)
 
 	testing.expect_value(t, len(fragments), 1)
-	for fragment in fragments {
+	for fragment, i in fragments {
 		testing.expect_value(t, fragment.fragment_header.fragment_size, MAX_FRAGMENT_SIZE)
+		testing.expect_value(t, fragment.fragment_header.fragment_id, u8(i))
+		testing.expect_value(t, fragment.fragment_header.num_fragments, u8(len(fragments)))
 	}
 }
 
@@ -673,8 +707,10 @@ test_split_packet_into_fragments_exact :: proc(t: ^testing.T) {
 	fragments := split_packet_into_fragments(0, packet_data, context.temp_allocator)
 
 	testing.expect_value(t, len(fragments), packet_size / MAX_FRAGMENT_SIZE)
-	for fragment in fragments {
+	for fragment, i in fragments {
 		testing.expect_value(t, fragment.fragment_header.fragment_size, MAX_FRAGMENT_SIZE)
+		testing.expect_value(t, fragment.fragment_header.fragment_id, u8(i))
+		testing.expect_value(t, fragment.fragment_header.num_fragments, u8(len(fragments)))
 	}
 }
 
@@ -695,6 +731,8 @@ test_split_packet_into_fragments_one_remainder :: proc(t: ^testing.T) {
 		} else {
 			testing.expect_value(t, fragment.fragment_header.fragment_size, MAX_FRAGMENT_SIZE)
 		}
+		testing.expect_value(t, fragment.fragment_header.fragment_id, u8(i))
+		testing.expect_value(t, fragment.fragment_header.num_fragments, u8(len(fragments)))
 	}
 }
 
@@ -744,8 +782,10 @@ test_serialize_split_and_reassemble_and_deserialize_test_packet :: proc(t: ^test
 
 	fragment_data_buffer := make([]u8, 2048 * size_of(u32), context.temp_allocator)
 
-	for fragment in fragments {
+	for fragment, i in fragments {
 		testing.expect_value(t, fragment.fragment_header.fragment_size, MAX_FRAGMENT_SIZE)
+		testing.expect_value(t, fragment.fragment_header.fragment_id, u8(i))
+		testing.expect_value(t, fragment.fragment_header.num_fragments, u8(len(fragments)))
 
 		mem.copy(
 			&fragment_data_buffer[int(fragment.fragment_header.fragment_id) * MAX_FRAGMENT_SIZE],
@@ -801,6 +841,8 @@ test_process_fragment :: proc(t: ^testing.T) {
 	)
 
 	fragment_entry := packet_buffer.entries[sequence].entry.(Fragment_Entry)
+
+	testing.expect_value(t, fragment_entry.num_fragments, fragment.fragment_header.num_fragments)
 
 	for i in 0 ..< len(fragment_entry.fragments[0]) {
 		testing.expect_value(t, fragment_entry.fragments[0][i], fragment_data[i])
@@ -879,4 +921,61 @@ test_process_packet :: proc(t: ^testing.T) {
 
 	num_fragments := len(fragments)
 	testing.expect_value(t, num_fragments, 8)
+
+	for fragment in fragments {
+		fragment_writer_buffer_size := (size_of(Fragment_Header) + MAX_FRAGMENT_SIZE)
+		fragment_writer_buffer := make(
+			[]u32,
+			fragment_writer_buffer_size / size_of(u32),
+			context.temp_allocator,
+		)
+
+		fragment_writer := create_writer(fragment_writer_buffer)
+
+		testing.expectf(
+			t,
+			serialize_fragment(&fragment_writer, fragment),
+			"serialize_fragment should be successful",
+		)
+
+		testing.expectf(t, flush_bits(&fragment_writer), "flush_bits should be successful")
+
+		packet_writer_buffer := make(
+			[]u32,
+			(size_of(Packet_Header) + fragment_writer_buffer_size) / size_of(u32),
+			context.temp_allocator,
+		)
+
+		packet_writer := create_writer(packet_writer_buffer)
+
+		packet_header := Packet_Header {
+			crc32       = 42,
+			packet_type = u32(Packet_Type.Test_B),
+			data_length = u32(fragment_writer_buffer_size),
+			sequence    = 0,
+			is_fragment = true,
+		}
+
+		testing.expectf(
+			t,
+			serialize_packet_from_header_and_byte_slice(
+				&packet_writer,
+				packet_header,
+				convert_word_slice_to_byte_slice(fragment_writer.buffer),
+			),
+			"serialize_packet_from_header_and_byte_slice should be successful",
+		)
+
+		testing.expectf(t, flush_bits(&packet_writer), "flush_bits should be successful")
+
+		testing.expectf(
+			t,
+			process_packet(
+				packet_buffer,
+				convert_word_slice_to_byte_slice(packet_writer.buffer),
+				context.temp_allocator,
+			),
+			"process_packet should be successful",
+		)
+	}
 }
