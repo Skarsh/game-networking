@@ -324,6 +324,52 @@ deserialize_test_packet_b :: proc(bit_reader: ^Bit_Reader) -> (Test_Packet_B, bo
 
 // ------------- Processing procedures -------------
 
+receive_fragments :: proc(
+	packet_buffer: ^Packet_Buffer,
+	sequence: u32,
+	allocator: runtime.Allocator,
+) -> (
+	Packet_Type,
+	[]u8,
+	bool,
+) {
+	// check if the sequence is valid and set
+	if packet_buffer.entries[sequence].sequence != u32(sequence) {
+		return Packet_Type.Test_A, nil, false
+	}
+
+	// get the entry
+	fragment_entry := packet_buffer.entries[sequence].entry.(Fragment_Entry)
+
+	// check if the amount of received fragments is equal to the amount of expected fragments
+	if fragment_entry.received_fragments != fragment_entry.num_fragments {
+		return Packet_Type.Test_A, nil, false
+	}
+
+	packet_type := packet_buffer.entries[sequence].packet_type
+
+	// calculate the total packet size
+	total_packet_size := 0
+	for fragment in fragment_entry.fragments {
+		total_packet_size += len(fragment)
+	}
+
+	assert(total_packet_size > 0)
+	assert(total_packet_size <= MAX_PACKET_SIZE)
+
+	// reassemble the packet, just the bytes though
+	packet_data := make([]u8, total_packet_size, allocator)
+	current_memory_offset := 0
+	for idx in 0 ..< fragment_entry.num_fragments {
+		fragment := fragment_entry.fragments[idx]
+		fragment_size := len(fragment)
+		mem.copy(&packet_data[current_memory_offset], &fragment[0], fragment_size)
+
+		current_memory_offset += fragment_size
+	}
+
+	return packet_type, packet_data, true
+}
 
 process_fragment :: proc(
 	packet_buffer: ^Packet_Buffer,
@@ -894,7 +940,7 @@ test_process_multiple_fragments :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_process_packet :: proc(t: ^testing.T) {
+test_process_packet_and_receive_fragments :: proc(t: ^testing.T) {
 	packet_buffer := new(Packet_Buffer, context.temp_allocator)
 	defer free_all(context.temp_allocator)
 	init_packet_buffer(packet_buffer)
@@ -977,5 +1023,22 @@ test_process_packet :: proc(t: ^testing.T) {
 			),
 			"process_packet should be successful",
 		)
+	}
+
+	packet_type, packet_data, receive_fragments_ok := receive_fragments(
+		packet_buffer,
+		sequence,
+		context.temp_allocator,
+	)
+
+	testing.expectf(t, receive_fragments_ok, "receive_fragments should be successful")
+	testing.expect_value(t, packet_type, Packet_Type.Test_B)
+
+
+	if packet_type == Packet_Type.Test_B {
+		test_packet_reader := create_reader(convert_byte_slice_to_word_slice(packet_data))
+		des_test_packet, des_test_packet_ok := deserialize_test_packet_b(&test_packet_reader)
+		testing.expectf(t, des_test_packet_ok, "deserialize_test_packet should be successful")
+		testing.expect_value(t, des_test_packet, test_packet)
 	}
 }
