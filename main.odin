@@ -9,6 +9,53 @@ import "core:net"
 
 import proto "protocol"
 
+// Receiver side needs to do the following steps
+// 1. Recv bytes from udp socket
+// 2. pass the data to the process_packet
+// 
+// So we need a data structure that holds the reader, Packet_Buffer
+
+Receiver :: struct {
+	socket:        net.UDP_Socket,
+	packet_buffer: proto.Packet_Buffer,
+	allocator:     runtime.Allocator,
+}
+
+create_receiver :: proc(allocator: runtime.Allocator) -> Receiver {
+	address := net.parse_address("127.0.0.1")
+	socket, bound_socket_err := net.make_bound_udp_socket(address, 8001)
+	assert(bound_socket_err == nil)
+
+	blocking_err := net.set_blocking(socket, false)
+	assert(blocking_err == nil)
+
+	packet_buffer := proto.Packet_Buffer{}
+	proto.init_packet_buffer(&packet_buffer)
+
+	receiver := Receiver {
+		socket        = socket,
+		packet_buffer = packet_buffer,
+		allocator     = allocator,
+	}
+
+	return receiver
+}
+
+recv_packets :: proc(receiver: ^Receiver) {
+	buf := make([]u8, proto.MAX_PACKET_SIZE, receiver.allocator)
+	bytes_read, remote_endpoint, recv_err := net.recv_udp(receiver.socket, buf)
+	assert(recv_err == nil)
+	if bytes_read == 0 {
+		return
+	}
+
+	process_ok := proto.process_packet(&receiver.packet_buffer, buf, receiver.allocator)
+	assert(process_ok)
+
+	log.info("packet_buffer: ", receiver.packet_buffer)
+
+}
+
 Packet_Stream :: struct {
 	persistent_allocator: runtime.Allocator,
 	temp_allocator:       runtime.Allocator,
@@ -53,6 +100,8 @@ enqueue_packet :: proc(packet: proto.Test_Packet, packet_stream: ^Packet_Stream)
 }
 
 process_and_send_stream :: proc(packet_stream: ^Packet_Stream) {
+	endpoint, endpoint_ok := net.parse_endpoint("127.0.0.1:8001")
+	assert(endpoint_ok)
 	for test_packet in queue.pop_front_safe(&packet_stream.packet_queue) {
 
 		// 2048 size_of(u32) == 8192 bytes is the worst case size of the test packet
@@ -146,9 +195,6 @@ process_and_send_stream :: proc(packet_stream: ^Packet_Stream) {
 				proto.reset_writer(&packet_stream.packet_writer)
 
 				// TODO(Thomas): This is just for testing, move to proper place.
-				endpoint, endpoint_ok := net.parse_endpoint("127.0.0.1:8001")
-				assert(endpoint_ok)
-
 				bytes_written, err := net.send_udp(
 					packet_stream.socket,
 					proto.convert_word_slice_to_byte_slice(packet_stream.packet_writer.buffer),
@@ -206,6 +252,15 @@ process_and_send_stream :: proc(packet_stream: ^Packet_Stream) {
 		}
 
 		// Ready to send to socket
+		// TODO(Thomas): This is just for testing, move to proper place.
+		bytes_written, err := net.send_udp(
+			packet_stream.socket,
+			proto.convert_word_slice_to_byte_slice(packet_stream.packet_writer.buffer),
+			endpoint,
+		)
+
+		log.info("bytes_written: ", bytes_written)
+		assert(err == nil)
 
 		// This needs to wrap around then going above 65535 (math.max(u16))
 		packet_stream.current_sequence += 1
@@ -257,6 +312,9 @@ main :: proc() {
 	lo: f32 = -1000
 	hi: f32 = 1000
 
+	// TODO(Thomas): Another allocator here maybe?
+	receiver := create_receiver(context.allocator)
+
 	for {
 		// Step 1: Create random test packet
 		test_packet := proto.random_test_packet(lo, hi)
@@ -266,6 +324,9 @@ main :: proc() {
 
 		// Step 3: Process and send packets
 		process_and_send_stream(&packet_stream)
+
+		// Step 4: Recv packets
+		recv_packets(&receiver)
 	}
 
 }
