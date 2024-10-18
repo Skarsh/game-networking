@@ -53,7 +53,6 @@ recv_packets :: proc(receiver: ^Receiver) {
 	assert(process_ok)
 
 	log.info("packet_buffer: ", receiver.packet_buffer)
-
 }
 
 Packet_Stream :: struct {

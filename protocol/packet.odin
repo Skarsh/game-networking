@@ -12,7 +12,7 @@ MAX_FRAGMENTS_PER_PACKET :: 256
 MAX_FRAGMENT_SIZE :: 1024
 MAX_PACKET_SIZE :: MAX_FRAGMENTS_PER_PACKET * MAX_FRAGMENT_SIZE
 
-MAX_ENTRIES :: 256
+MAX_ENTRIES :: 8
 
 // Used to represent empty entries since it cannot occur
 // by 16 bit sequence numbers.
@@ -488,7 +488,12 @@ process_fragment :: proc(
 		}
 
 		packet_buffer.entries[index].sequence = u32(sequence)
-		packet_buffer.current_sequence = u32(sequence)
+
+		// TODO(Thomas): Is this correct??
+		sequence := u32(sequence)
+		if sequence > packet_buffer.current_sequence {
+			packet_buffer.current_sequence = sequence
+		}
 	} else {
 
 		fragment_entry := &packet_buffer.entries[index].entry.(Fragment_Entry)
@@ -508,7 +513,62 @@ process_fragment :: proc(
 		)
 
 		packet_buffer.entries[index].sequence = u32(sequence)
-		packet_buffer.current_sequence = u32(sequence)
+
+		// TODO(Thomas): Is this correct??
+		sequence := u32(sequence)
+		if sequence > packet_buffer.current_sequence {
+			packet_buffer.current_sequence = sequence
+		}
+	}
+
+	return true
+}
+
+process_complete :: proc(
+	packet_buffer: ^Packet_Buffer,
+	sequence: u16,
+	packet_type: Packet_Type,
+	packet_data: []u8,
+	allocator: runtime.Allocator,
+) -> bool {
+	assert(len(packet_data) > 0)
+	// TODO(Thomas): Is the MAX_FRAGMENT_SIZE the right check here? 
+	assert(len(packet_data) <= MAX_FRAGMENT_SIZE)
+
+	index := get_sequence_index(sequence)
+
+	words := convert_byte_slice_to_word_slice(packet_data)
+	packet_reader := create_reader(words)
+
+	#partial switch packet_type {
+	case .Test_A:
+		test_packet_a, test_packet_a_ok := deserialize_test_packet_a(&packet_reader)
+		if !test_packet_a_ok {
+			return false
+		}
+
+		packet_buffer.entries[index] = Packet_Entry {
+			packet_type = packet_type,
+			sequence = u32(sequence),
+			entry = Complete_Entry{data = packet_data},
+		}
+
+		packet_buffer.entries[index].sequence = u32(sequence)
+
+		// TODO(Thomas): Is this correct??
+		sequence := u32(sequence)
+		if sequence > packet_buffer.current_sequence {
+			packet_buffer.current_sequence = sequence
+		}
+
+
+	case .Test_B:
+		unreachable()
+	case .Test_C:
+		test_packet_c, test_packet_c_ok := deserialize_test_packet_c(&packet_reader)
+		if !test_packet_c_ok {
+			return false
+		}
 	}
 
 	return true
@@ -547,37 +607,34 @@ process_packet :: proc(
 	protocol_id_bytes := transmute([4]u8)protocol_id
 	crc32 := calculate_crc32(protocol_id_bytes[:])
 
+	// Process fragment
+	if packet.packet_header.is_fragment {
+		// NOTE(Thomas): Need to create new reader here, or reset since if not
+		// the number of bits read will not match
+		fragment_reader := create_reader(convert_byte_slice_to_word_slice(packet.data))
 
-	// For now, Chunk is the only packet type that is not deemed realtime(unreliable)
-	#partial switch Packet_Type(packet.packet_header.packet_type) {
-	case .Chunk:
-	// Do chunk stuff
-
-	case .Test_A:
-	// This is a complete packet, and always will be
-	case .Test_B:
-		// This will be larger than MTU and hence fragmented
-		if packet.packet_header.is_fragment {
-			// NOTE(Thomas): Need to create new reader here, or reset since if not
-			// the number of bits read will not match
-			fragment_reader := create_reader(convert_byte_slice_to_word_slice(packet.data))
-
-			fragment, fragment_ok := deserialize_fragment(&fragment_reader, allocator)
-			if !fragment_ok {
-				return false
-			}
-
-			// TODO(Thomas): Pass in the same allocator?
-			process_fragment(
-				packet_buffer,
-				packet.packet_header.sequence,
-				Packet_Type(packet.packet_header.packet_type),
-				fragment,
-				allocator,
-			) or_return
+		fragment, fragment_ok := deserialize_fragment(&fragment_reader, allocator)
+		if !fragment_ok {
+			return false
 		}
-	case .Test_C:
-	// This is a complete packet, and always will be
+
+		// TODO(Thomas): Pass in the same allocator?
+		process_fragment(
+			packet_buffer,
+			packet.packet_header.sequence,
+			Packet_Type(packet.packet_header.packet_type),
+			fragment,
+			allocator,
+		) or_return
+	} else {
+		// Process complete
+		process_complete(
+			packet_buffer,
+			packet.packet_header.sequence,
+			Packet_Type(packet.packet_header.packet_type),
+			packet.data,
+			allocator,
+		) or_return
 	}
 
 	return true
