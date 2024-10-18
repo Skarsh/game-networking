@@ -42,7 +42,7 @@ create_receiver :: proc(allocator: runtime.Allocator) -> Receiver {
 }
 
 recv_packets :: proc(receiver: ^Receiver) {
-	buf := make([]u8, proto.MAX_PACKET_SIZE, receiver.allocator)
+	buf := make([]u8, proto.MTU, receiver.allocator)
 	bytes_read, remote_endpoint, recv_err := net.recv_udp(receiver.socket, buf)
 	assert(recv_err == nil)
 	if bytes_read == 0 {
