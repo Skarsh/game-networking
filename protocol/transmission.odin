@@ -7,6 +7,16 @@ import "core:log"
 import "core:mem"
 import "core:net"
 
+MAX_FRAGMENTS_PER_PACKET :: 256
+MAX_FRAGMENT_SIZE :: 1024
+MAX_PACKET_SIZE :: MAX_FRAGMENTS_PER_PACKET * MAX_FRAGMENT_SIZE
+
+// Used to represent empty entries since it cannot occur
+// by 16 bit sequence numbers.
+ENTRY_SENTINEL_VALUE :: 0xFFFF_FFFF
+
+MAX_ENTRIES :: 8
+
 MAX_OUTGOING_PACKETS :: 8
 
 Send_Stream :: struct {
@@ -72,7 +82,8 @@ create_net_packet :: proc(
 		is_fragment = is_fragment,
 	}
 
-	packet_buffer := make([]u32, (size_of(Packet_Header) + data_size) / size_of(u32), allocator)
+	packet_size_bytes := size_of(Packet_Header) + data_size
+	packet_buffer := make([]u32, packet_size_bytes / size_of(u32), allocator)
 	packet_writer := create_writer(packet_buffer)
 
 	serialize_packet_ok := serialize_packet_from_header_and_byte_slice(
@@ -88,10 +99,14 @@ create_net_packet :: proc(
 	return convert_word_slice_to_byte_slice(packet_writer.buffer)
 }
 
+// TODO(Thomas): Make sure the sequence number wraps around
 enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, packet_data: []u8) {
 	assert(len(packet_data) > 0)
 	assert(len(packet_data) <= MAX_PACKET_SIZE)
 
+	// TODO(Thomas): Think about whether we should just always send fragments
+	// and just check whether packet data is larger than MAX_FRAGMENT_SIZE
+	// and hence whether it should be split or not.
 	if len(packet_data) > MTU {
 		// Larger than MTU, so we need to split it into fragments
 		fragments := split_packet_into_fragments(packet_data, send_stream.allocator)
@@ -147,19 +162,73 @@ process_send_stream :: proc(send_stream: ^Send_Stream) {
 		log.info("bytes_written: ", bytes_written)
 		assert(err == nil)
 	}
+
+	free_send_stream(send_stream)
 }
 
-Realtime_Packet_Buffer :: struct {}
+Fragment_Data :: struct {
+	data_length: u32,
+	data:        [MAX_FRAGMENT_SIZE]u8,
+}
 
-init_realtime_packet_buffer :: proc(packet_buffer: ^Realtime_Packet_Buffer) {}
+Fragment_Entry :: struct {
+	num_fragments:      u8,
+	received_fragments: u8,
+	fragments:          [MAX_FRAGMENTS_PER_PACKET]Fragment_Data,
+}
+
+Complete_Entry :: struct {
+	data_length: u32,
+	data:        [MTU]u8,
+}
+
+Realtime_Packet_Entry :: struct {
+	packet_type: u32,
+	sequence:    u32,
+	entry:       union {
+		Complete_Entry,
+		Fragment_Entry,
+	},
+}
+
+Realtime_Packet_Buffer :: struct {
+	current_sequence: u32,
+	entries:          [MAX_ENTRIES]Realtime_Packet_Entry,
+}
+
+get_realtime_packet_entry :: proc(
+	idx: int,
+	realtime_packet_buffer: ^Realtime_Packet_Buffer,
+) -> (
+	^Realtime_Packet_Entry,
+	bool,
+) {
+	if idx < 0 || idx >= len(realtime_packet_buffer.entries) {
+		return nil, false
+	}
+
+	return &realtime_packet_buffer.entries[idx], true
+}
+
+init_realtime_packet_buffer :: proc(packet_buffer: ^Realtime_Packet_Buffer) {
+	for idx in 0 ..< len(packet_buffer.entries) {
+		entry, entry_ok := get_realtime_packet_entry(idx, packet_buffer)
+		assert(entry_ok)
+		entry.sequence = ENTRY_SENTINEL_VALUE
+	}
+}
 
 // NOTE(Thomas): Think about allocation and how to do them well for the Realtime Packet Buffer
 Recv_Stream :: struct {
 	persistent_allocator:   runtime.Allocator,
 	temp_allocator:         runtime.Allocator,
-	realtime_packet_buffer: Realtime_Packet_Buffer,
+	realtime_packet_buffer: ^Realtime_Packet_Buffer,
 	socket:                 net.UDP_Socket,
 	net_packet_buf:         [MTU]u8,
+}
+
+recv_stream_free_temp_allocator :: proc(recv_stream: ^Recv_Stream) {
+	free_all(recv_stream.temp_allocator)
 }
 
 create_recv_stream :: proc(
@@ -168,8 +237,8 @@ create_recv_stream :: proc(
 	address: string,
 	port: int,
 ) -> Recv_Stream {
-	realtime_packet_buffer := Realtime_Packet_Buffer{}
-	init_realtime_packet_buffer(&realtime_packet_buffer)
+	realtime_packet_buffer := new(Realtime_Packet_Buffer, persistent_allocator)
+	init_realtime_packet_buffer(realtime_packet_buffer)
 
 	address := net.parse_address(address)
 	assert(address != nil)
@@ -189,22 +258,48 @@ create_recv_stream :: proc(
 	}
 }
 
-recv_packet :: proc(recv_stream: ^Recv_Stream) -> ([]u8, bool) {
+recv_packet :: proc(recv_stream: ^Recv_Stream) {
 	bytes_read, remote_endpoint, recv_err := net.recv_udp(
 		recv_stream.socket,
 		recv_stream.net_packet_buf[:],
 	)
 	assert(recv_err == nil)
+	// TODO(Thomas): Return false or some error type here?
 	if bytes_read == 0 {
-		return nil, false
+		return
 	}
 
-	packet_reader := create_reader(convert_byte_slice_to_word_slice(recv_stream.net_packet_buf[:]))
+	ok := process_packet(recv_stream.net_packet_buf[:], recv_stream)
+	assert(ok)
+}
 
-	packet, packet_ok := deserialize_packet(&packet_reader, recv_stream.persistent_allocator)
+process_packet :: proc(packet_data: []u8, recv_stream: ^Recv_Stream) -> bool {
+	assert(len(packet_data) > 0)
+	assert(len(packet_data) <= MTU)
+
+	packet_reader := create_reader(convert_byte_slice_to_word_slice(packet_data))
+
+	packet, packet_ok := deserialize_packet(&packet_reader, recv_stream.temp_allocator)
 	assert(packet_ok)
 
 	log.info("packet: ", packet)
 
-	return packet.data, true
+	qos := QOS(packet.packet_header.qos)
+
+	switch qos {
+	case .Best_Effort:
+		// TODO(Thomas): Think about wether we should just have everything be fragment
+		// and that way not having to special case anything
+		if packet.packet_header.is_fragment {
+			// Process fragment
+
+		} else {
+			// Process complete
+
+		}
+
+	case .Reliable:
+	}
+
+	return true
 }

@@ -3,16 +3,6 @@ package protocol
 import "base:runtime"
 import "core:mem"
 
-MAX_FRAGMENTS_PER_PACKET :: 256
-MAX_FRAGMENT_SIZE :: 1024
-MAX_PACKET_SIZE :: MAX_FRAGMENTS_PER_PACKET * MAX_FRAGMENT_SIZE
-
-MAX_ENTRIES :: 8
-
-// Used to represent empty entries since it cannot occur
-// by 16 bit sequence numbers.
-ENTRY_SENTINEL_VALUE :: 0xFFFF_FFFF
-
 QOS :: enum {
 	Best_Effort,
 	Reliable,

@@ -200,18 +200,18 @@ main :: proc() {
 	assert(send_stream.current_sequence == 1)
 
 	proto.process_send_stream(&send_stream)
-	proto.free_send_stream(&send_stream)
 
-	packet_bytes, recv_ok := proto.recv_packet(&recv_stream)
-	assert(recv_ok)
-	assert(packet_bytes != nil)
+	proto.recv_packet(&recv_stream)
 
-	test_packet_reader := proto.create_reader(proto.convert_byte_slice_to_word_slice(packet_bytes))
+	//packet_bytes, recv_ok := proto.recv_packet(&recv_stream)
+	//assert(recv_ok)
+	//assert(packet_bytes != nil)
 
-	des_test_packet_a, des_test_packet_ok := deserialize_test_packet_a(&test_packet_reader)
-	assert(des_test_packet_ok)
-	assert(des_test_packet_a == test_packet_a)
+	//test_packet_reader := proto.create_reader(proto.convert_byte_slice_to_word_slice(packet_bytes))
 
+	//des_test_packet_a, des_test_packet_ok := deserialize_test_packet_a(&test_packet_reader)
+	//assert(des_test_packet_ok)
+	//assert(des_test_packet_a == test_packet_a)
 }
 
 @(test)
@@ -241,6 +241,61 @@ test_serialize_deserialize_test_packet_a :: proc(t: ^testing.T) {
 	testing.expectf(t, des_test_packet_a_ok, "deserialize_test_packet_a should be successful")
 
 	testing.expect_value(t, des_test_packet_a, test_packet_a)
+}
+
+@(test)
+test_serialize_deserialize_test_packet_b :: proc(t: ^testing.T) {
+	buffer := make([]u32, 2048)
+	defer delete(buffer)
+	writer := proto.create_writer(buffer)
+	reader := proto.create_reader(buffer)
+
+	test_packet_b := Test_Packet_B{}
+	for &item in test_packet_b.items {
+		item = 42
+	}
+
+	testing.expectf(
+		t,
+		serialize_test_packet_b(&writer, test_packet_b),
+		"serialize_test_packet_b should be successful",
+	)
+
+	testing.expectf(t, proto.flush_bits(&writer), "flush_bits should be successful")
+
+	des_test_packet_b, des_test_packet_b_ok := deserialize_test_packet_b(&reader)
+
+	testing.expectf(t, des_test_packet_b_ok, "deserialize_test_packet_b should be successful")
+
+	testing.expect_value(t, des_test_packet_b, test_packet_b)
+}
+
+@(test)
+test_serialize_deserialize_test_packet_c :: proc(t: ^testing.T) {
+
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := proto.create_writer(buffer)
+	reader := proto.create_reader(buffer)
+
+	test_packet_c := Test_Packet_C {
+		position = proto.Vector3{1.0, 2.0, 3.0},
+		velocity = proto.Vector3{4.0, 5.0, 6.0},
+	}
+
+	testing.expectf(
+		t,
+		serialize_test_packet_c(&writer, test_packet_c),
+		"serialize_test_packet_c should be successful",
+	)
+
+	testing.expectf(t, proto.flush_bits(&writer), "flush_bits should be successful")
+
+	des_test_packet_c, des_test_packet_c_ok := deserialize_test_packet_c(&reader)
+
+	testing.expectf(t, des_test_packet_c_ok, "deserialize_test_packet_c should be successful")
+
+	testing.expect_value(t, des_test_packet_c, test_packet_c)
 }
 
 //import "base:runtime"
