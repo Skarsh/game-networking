@@ -82,13 +82,15 @@ create_net_packet :: proc(
 	)
 	assert(serialize_packet_ok)
 
+	flush_ok := flush_bits(&packet_writer)
+	assert(flush_ok)
+
 	return convert_word_slice_to_byte_slice(packet_writer.buffer)
 }
 
 enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, packet_data: []u8) {
-	log.info("packet_data", packet_data)
 	assert(len(packet_data) > 0)
-	assert(len(packet_data) < MAX_PACKET_SIZE)
+	assert(len(packet_data) <= MAX_PACKET_SIZE)
 
 	if len(packet_data) > MTU {
 		// Larger than MTU, so we need to split it into fragments
@@ -139,8 +141,6 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 
 process_send_stream :: proc(send_stream: ^Send_Stream) {
 	for packet_bytes in queue.pop_front_safe(&send_stream.queue) {
-
-		log.info("packet_bytes: ", packet_bytes)
 
 		bytes_written, err := net.send_udp(send_stream.socket, packet_bytes, send_stream.endpoint)
 

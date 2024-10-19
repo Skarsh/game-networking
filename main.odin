@@ -203,7 +203,6 @@ main :: proc() {
 	proto.free_send_stream(&send_stream)
 
 	packet_bytes, recv_ok := proto.recv_packet(&recv_stream)
-	log.info("main recv packet_bytes: ", packet_bytes)
 	assert(recv_ok)
 	assert(packet_bytes != nil)
 
@@ -211,8 +210,6 @@ main :: proc() {
 
 	des_test_packet_a, des_test_packet_ok := deserialize_test_packet_a(&test_packet_reader)
 	assert(des_test_packet_ok)
-	log.info("test_packet_a: ", test_packet_a)
-	log.info("des_test_packet: ", des_test_packet_a)
 	assert(des_test_packet_a == test_packet_a)
 
 }
