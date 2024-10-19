@@ -595,6 +595,7 @@ test_serialize_deserialize_integer_edge_cases :: proc(t: ^testing.T) {
 		{0, -128, 127}, // Zero
 		{-1, -1, 0}, // Negative to zero range
 		{1, 1, 2}, // Positive range starting from 1
+		{1, math.min(i32), math.max(i32)}, // Min and max value of i32,
 	}
 
 	for test_case in test_cases {
