@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:mem"
+import "core:testing"
 
 import proto "protocol"
 
@@ -206,13 +207,7 @@ main :: proc() {
 	assert(recv_ok)
 	assert(packet_bytes != nil)
 
-	test_packet_reader_buffer := make(
-		[]u32,
-		size_of(Test_Packet_A) / size_of(u32),
-		context.allocator,
-	)
-	test_packet_reader := proto.create_reader(test_packet_reader_buffer)
-	defer delete(test_packet_reader_buffer)
+	test_packet_reader := proto.create_reader(proto.convert_byte_slice_to_word_slice(packet_bytes))
 
 	des_test_packet_a, des_test_packet_ok := deserialize_test_packet_a(&test_packet_reader)
 	assert(des_test_packet_ok)
@@ -220,6 +215,35 @@ main :: proc() {
 	log.info("des_test_packet: ", des_test_packet_a)
 	assert(des_test_packet_a == test_packet_a)
 
+}
+
+@(test)
+test_serialize_deserialize_test_packet_a :: proc(t: ^testing.T) {
+
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := proto.create_writer(buffer)
+	reader := proto.create_reader(buffer)
+
+	test_packet_a := Test_Packet_A {
+		a = 1,
+		b = 2,
+		c = 3,
+	}
+
+	testing.expectf(
+		t,
+		serialize_test_packet_a(&writer, test_packet_a),
+		"serialize_test_packet_a should be successful",
+	)
+
+	testing.expectf(t, proto.flush_bits(&writer), "flush_bits should be successful")
+
+	des_test_packet_a, des_test_packet_a_ok := deserialize_test_packet_a(&reader)
+
+	testing.expectf(t, des_test_packet_a_ok, "deserialize_test_packet_a should be successful")
+
+	testing.expect_value(t, des_test_packet_a, test_packet_a)
 }
 
 //import "base:runtime"
