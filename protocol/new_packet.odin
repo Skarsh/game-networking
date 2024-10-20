@@ -2,6 +2,7 @@ package protocol
 
 import "base:runtime"
 import "core:mem"
+import "core:testing"
 
 QOS :: enum {
 	Best_Effort,
@@ -14,12 +15,11 @@ Packet_Header :: struct {
 	packet_type: u32,
 	data_length: u32,
 	sequence:    u16,
-	is_fragment: bool,
 }
 
 Packet :: struct {
-	packet_header: Packet_Header,
-	data:          []u8,
+	header: Packet_Header,
+	data:   []u8,
 }
 
 // TODO(Thomas): Make the fragment_size u16 instead
@@ -30,8 +30,8 @@ Fragment_Header :: struct {
 }
 
 Fragment :: struct {
-	fragment_header: Fragment_Header,
-	data:            []u8,
+	header: Fragment_Header,
+	data:   []u8,
 }
 
 // ------------- Serializiation procedures -------------
@@ -48,7 +48,6 @@ serialize_packet_header :: proc(bit_writer: ^Bit_Writer, packet_header: Packet_H
 	serialize_u32(bit_writer, packet_header.packet_type) or_return
 	serialize_u32(bit_writer, packet_header.data_length) or_return
 	serialize_u16(bit_writer, packet_header.sequence) or_return
-	serialize_bool(bit_writer, packet_header.is_fragment) or_return
 
 	return true
 }
@@ -73,7 +72,7 @@ serialize_packet_from_header_and_byte_slice :: proc(
 @(require_results)
 serialize_packet :: proc(bit_writer: ^Bit_Writer, packet: Packet) -> bool {
 
-	serialize_packet_header(bit_writer, packet.packet_header) or_return
+	serialize_packet_header(bit_writer, packet.header) or_return
 
 	// Ensure we're aligned with next byte boundary
 	write_align(bit_writer) or_return
@@ -98,7 +97,7 @@ serialize_fragment_header :: proc(
 @(require_results)
 serialize_fragment :: proc(bit_writer: ^Bit_Writer, fragment: Fragment) -> bool {
 
-	serialize_fragment_header(bit_writer, fragment.fragment_header) or_return
+	serialize_fragment_header(bit_writer, fragment.header) or_return
 
 	// Ensure we're aligned with next byte boundary
 	serialize_align(bit_writer) or_return
@@ -138,10 +137,6 @@ deserialize_packet_header :: proc(bit_reader: ^Bit_Reader) -> (Packet_Header, bo
 		return Packet_Header{}, false
 	}
 
-	is_fragment, is_fragment_ok := deserialize_bool(bit_reader)
-	if !is_fragment_ok {
-		return Packet_Header{}, false
-	}
 
 	return Packet_Header {
 			crc32 = crc32,
@@ -149,7 +144,6 @@ deserialize_packet_header :: proc(bit_reader: ^Bit_Reader) -> (Packet_Header, bo
 			packet_type = packet_type,
 			data_length = data_length,
 			sequence = u16(sequence),
-			is_fragment = is_fragment,
 		},
 		true
 }
@@ -233,53 +227,162 @@ deserialize_fragment :: proc(
 	}
 
 	fragment := Fragment {
-		fragment_header = fragment_header,
-		data            = data,
+		header = fragment_header,
+		data   = data,
 	}
 
 	return fragment, true
 }
 
-//// ------------- Utility procedures -------------
+// ------------- Utility procedures -------------
+
 split_packet_into_fragments :: proc(
 	packet_data: []u8,
 	allocator: runtime.Allocator,
 ) -> []Fragment {
-
-	num_fragments := 0
-
-	packet_size := u32(len(packet_data))
+	packet_size := len(packet_data)
 	assert(packet_size > 0)
-	assert(packet_size < MAX_PACKET_SIZE)
+	assert(packet_size <= MAX_PACKET_SIZE)
 
-	remainder := packet_size % MAX_FRAGMENT_SIZE
-
-	if remainder == 0 {
-		num_fragments = int(packet_size) / MAX_FRAGMENT_SIZE
-	} else {
-		num_fragments = (int(packet_size) / MAX_FRAGMENT_SIZE) + 1
-	}
+	fragment_size := min(packet_size, MAX_FRAGMENT_SIZE)
+	num_fragments := (packet_size + MAX_FRAGMENT_SIZE - 1) / MAX_FRAGMENT_SIZE
 
 	fragments := make([]Fragment, num_fragments, allocator)
 
 	for &fragment, i in fragments {
+		start := i * MAX_FRAGMENT_SIZE
+		end := min(start + MAX_FRAGMENT_SIZE, packet_size)
+		current_fragment_size := end - start
 
-		fragment_size := MAX_FRAGMENT_SIZE
+		fragment.data = make([]u8, current_fragment_size, allocator)
+		mem.copy(&fragment.data[0], &packet_data[start], current_fragment_size)
 
-		// The case where packet_size / MAX_FRAGMENT_SIZE does not divide evenly, we get a
-		// remainder which will be the size of the last packet.
-		if remainder != 0 && i == int(num_fragments) - 1 {
-			fragment_size = int(remainder)
+		fragment.header = Fragment_Header {
+			fragment_size = u32(current_fragment_size),
+			fragment_id   = u8(i),
+			num_fragments = u8(num_fragments),
 		}
-
-		fragment.data = make([]u8, MAX_FRAGMENT_SIZE, allocator)
-
-		mem.copy(&fragment.data[0], &packet_data[i * fragment_size], fragment_size)
-
-		fragment.fragment_header.fragment_size = u32(fragment_size)
-		fragment.fragment_header.fragment_id = u8(i)
-		fragment.fragment_header.num_fragments = u8(num_fragments)
 	}
 
 	return fragments
+}
+
+@(test)
+test_split_packet_into_fragments :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
+	// Test case 1: Packet smaller than MAX_FRAGMENT_SIZE
+	{
+		packet := make([]u8, 512)
+		for i in 0 ..< 512 do packet[i] = u8(i % 256)
+
+		fragments := split_packet_into_fragments(packet, context.allocator)
+		defer delete(fragments)
+
+		testing.expect(t, len(fragments) == 1, "Expected 1 fragment for small packet")
+		testing.expect(t, fragments[0].header.fragment_size == 512, "Incorrect fragment size")
+		testing.expect(t, fragments[0].header.fragment_id == 0, "Incorrect fragment ID")
+		testing.expect(t, fragments[0].header.num_fragments == 1, "Incorrect number of fragments")
+		testing.expect(
+			t,
+			mem.compare(fragments[0].data, packet) == 0,
+			"Fragment data doesn't match packet data",
+		)
+	}
+
+	// Test case 2: Packet exactly MAX_FRAGMENT_SIZE
+	{
+		packet := make([]u8, MAX_FRAGMENT_SIZE)
+		for i in 0 ..< MAX_FRAGMENT_SIZE do packet[i] = u8(i % 256)
+
+		fragments := split_packet_into_fragments(packet, context.allocator)
+		defer delete(fragments)
+
+		testing.expect(t, len(fragments) == 1, "Expected 1 fragment for MAX_FRAGMENT_SIZE packet")
+		testing.expect(
+			t,
+			fragments[0].header.fragment_size == MAX_FRAGMENT_SIZE,
+			"Incorrect fragment size",
+		)
+		testing.expect(t, fragments[0].header.fragment_id == 0, "Incorrect fragment ID")
+		testing.expect(t, fragments[0].header.num_fragments == 1, "Incorrect number of fragments")
+		testing.expect(
+			t,
+			mem.compare(fragments[0].data, packet) == 0,
+			"Fragment data doesn't match packet data",
+		)
+	}
+
+	// Test case 3: Packet larger than MAX_FRAGMENT_SIZE but not a multiple
+	{
+		packet := make([]u8, MAX_FRAGMENT_SIZE + 512)
+		for i in 0 ..< len(packet) do packet[i] = u8(i % 256)
+
+		fragments := split_packet_into_fragments(packet, context.allocator)
+		defer delete(fragments)
+
+		testing.expect(t, len(fragments) == 2, "Expected 2 fragments for large packet")
+		testing.expect(
+			t,
+			fragments[0].header.fragment_size == MAX_FRAGMENT_SIZE,
+			"Incorrect first fragment size",
+		)
+		testing.expect(
+			t,
+			fragments[1].header.fragment_size == 512,
+			"Incorrect second fragment size",
+		)
+		testing.expect(t, fragments[0].header.fragment_id == 0, "Incorrect first fragment ID")
+		testing.expect(t, fragments[1].header.fragment_id == 1, "Incorrect second fragment ID")
+		testing.expect(t, fragments[0].header.num_fragments == 2, "Incorrect number of fragments")
+		testing.expect(t, fragments[1].header.num_fragments == 2, "Incorrect number of fragments")
+		testing.expect(
+			t,
+			mem.compare(fragments[0].data, packet[:MAX_FRAGMENT_SIZE]) == 0,
+			"First fragment data mismatch",
+		)
+		testing.expect(
+			t,
+			mem.compare(fragments[1].data, packet[MAX_FRAGMENT_SIZE:]) == 0,
+			"Second fragment data mismatch",
+		)
+	}
+
+	// Test case 4: Packet size at MAX_PACKET_SIZE - 1
+	{
+		packet := make([]u8, MAX_PACKET_SIZE - 1)
+		for i in 0 ..< len(packet) do packet[i] = u8(i % 256)
+
+		fragments := split_packet_into_fragments(packet, context.allocator)
+		defer delete(fragments)
+
+		expected_fragments := (MAX_PACKET_SIZE - 1 + MAX_FRAGMENT_SIZE - 1) / MAX_FRAGMENT_SIZE
+		testing.expect(
+			t,
+			len(fragments) == expected_fragments,
+			"Incorrect number of fragments for max packet size",
+		)
+
+		for i in 0 ..< len(fragments) {
+			testing.expect(t, fragments[i].header.fragment_id == u8(i), "Incorrect fragment ID")
+			testing.expect(
+				t,
+				fragments[i].header.num_fragments == u8(expected_fragments),
+				"Incorrect number of fragments",
+			)
+
+			start := i * MAX_FRAGMENT_SIZE
+			end := min(start + MAX_FRAGMENT_SIZE, len(packet))
+			testing.expect(
+				t,
+				fragments[i].header.fragment_size == u32(end - start),
+				"Incorrect fragment size",
+			)
+			testing.expect(
+				t,
+				mem.compare(fragments[i].data, packet[start:end]) == 0,
+				"Fragment data mismatch",
+			)
+		}
+	}
 }

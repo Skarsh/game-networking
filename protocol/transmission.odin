@@ -67,7 +67,6 @@ create_net_packet :: proc(
 	sequence: u16,
 	qos: QOS,
 	packet_type: u32,
-	is_fragment: bool,
 	data: []u8,
 ) -> []u8 {
 	data_size: u32 = u32(len(data))
@@ -79,7 +78,6 @@ create_net_packet :: proc(
 		packet_type = packet_type,
 		data_length = data_size,
 		sequence    = sequence,
-		is_fragment = is_fragment,
 	}
 
 	packet_size_bytes := size_of(Packet_Header) + data_size
@@ -104,14 +102,14 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 	assert(len(packet_data) > 0)
 	assert(len(packet_data) <= MAX_PACKET_SIZE)
 
-	// TODO(Thomas): Think about whether we should just always send fragments
-	// and just check whether packet data is larger than MAX_FRAGMENT_SIZE
-	// and hence whether it should be split or not.
-	if len(packet_data) > MTU {
-		// Larger than MTU, so we need to split it into fragments
+	log.info("len(packet_data): ", len(packet_data))
+
+	switch qos {
+	case .Best_Effort:
 		fragments := split_packet_into_fragments(packet_data, send_stream.allocator)
 
 		for fragment in fragments {
+			log.info("len(fragment.data): ", len(fragment.data))
 			fragment_buffer := make(
 				[]u32,
 				(size_of(Fragment_Header) + len(fragment.data)) / size_of(u32),
@@ -122,12 +120,14 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 			serialize_fragment_ok := serialize_fragment(&fragment_writer, fragment)
 			assert(serialize_fragment_ok)
 
+			flush_ok := flush_bits(&fragment_writer)
+			assert(flush_ok)
+
 			packet_bytes := create_net_packet(
 				send_stream.allocator,
 				send_stream.current_sequence,
 				qos,
 				packet_type,
-				true,
 				convert_word_slice_to_byte_slice(fragment_writer.buffer),
 			)
 
@@ -136,19 +136,7 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 			assert(push_err == nil)
 		}
 
-	} else {
-		// The packet data is small enough to fit into a single network packet
-		packet_bytes := create_net_packet(
-			send_stream.allocator,
-			send_stream.current_sequence,
-			qos,
-			packet_type,
-			false,
-			packet_data,
-		)
-		push_ok, push_err := queue.push_back(&send_stream.queue, packet_bytes)
-		assert(push_ok)
-		assert(push_err == nil)
+	case .Reliable:
 	}
 
 	send_stream.current_sequence += 1
@@ -167,7 +155,7 @@ process_send_stream :: proc(send_stream: ^Send_Stream) {
 }
 
 Fragment_Data :: struct {
-	data_length: u32,
+	data_length: int,
 	data:        [MAX_FRAGMENT_SIZE]u8,
 }
 
@@ -177,18 +165,10 @@ Fragment_Entry :: struct {
 	fragments:          [MAX_FRAGMENTS_PER_PACKET]Fragment_Data,
 }
 
-Complete_Entry :: struct {
-	data_length: u32,
-	data:        [MTU]u8,
-}
-
 Realtime_Packet_Entry :: struct {
 	packet_type: u32,
 	sequence:    u32,
-	entry:       union {
-		Complete_Entry,
-		Fragment_Entry,
-	},
+	entry:       Fragment_Entry,
 }
 
 Realtime_Packet_Buffer :: struct {
@@ -258,6 +238,10 @@ create_recv_stream :: proc(
 	}
 }
 
+destroy_recv_stream :: proc(recv_stream: ^Recv_Stream) {
+	free(recv_stream.realtime_packet_buffer, recv_stream.persistent_allocator)
+}
+
 recv_packet :: proc(recv_stream: ^Recv_Stream) {
 	bytes_read, remote_endpoint, recv_err := net.recv_udp(
 		recv_stream.socket,
@@ -269,7 +253,7 @@ recv_packet :: proc(recv_stream: ^Recv_Stream) {
 		return
 	}
 
-	ok := process_packet(recv_stream.net_packet_buf[:], recv_stream)
+	ok := process_packet(recv_stream.net_packet_buf[:bytes_read], recv_stream)
 	assert(ok)
 }
 
@@ -277,29 +261,114 @@ process_packet :: proc(packet_data: []u8, recv_stream: ^Recv_Stream) -> bool {
 	assert(len(packet_data) > 0)
 	assert(len(packet_data) <= MTU)
 
+	log.info("len(packet_data): ", len(packet_data))
+
 	packet_reader := create_reader(convert_byte_slice_to_word_slice(packet_data))
 
 	packet, packet_ok := deserialize_packet(&packet_reader, recv_stream.temp_allocator)
+	assert(packet.header.data_length > 0)
+
+	// TODO(Thomas): MTU or MAX_FRAGMENT_SIZE here?
+	assert(packet.header.data_length <= MTU)
+
+	defer recv_stream_free_temp_allocator(recv_stream)
 	assert(packet_ok)
+	if !packet_ok {
+		return false
+	}
 
-	log.info("packet: ", packet)
-
-	qos := QOS(packet.packet_header.qos)
+	qos := QOS(packet.header.qos)
 
 	switch qos {
 	case .Best_Effort:
 		// TODO(Thomas): Think about wether we should just have everything be fragment
 		// and that way not having to special case anything
-		if packet.packet_header.is_fragment {
-			// Process fragment
 
-		} else {
-			// Process complete
-
+		// Process fragment
+		fragment_ok := process_fragment(
+			packet.header.sequence,
+			packet.header.packet_type,
+			packet.data[:packet.header.data_length],
+			recv_stream,
+		)
+		assert(fragment_ok)
+		if !fragment_ok {
+			return false
 		}
-
 	case .Reliable:
 	}
 
 	return true
+}
+
+process_fragment :: proc(
+	sequence: u16,
+	packet_type: u32,
+	fragment_data: []u8,
+	recv_stream: ^Recv_Stream,
+) -> bool {
+	assert(len(fragment_data) > 0)
+	assert(len(fragment_data) <= MAX_FRAGMENT_SIZE + size_of(Fragment_Header))
+
+
+	fragment_reader := create_reader(convert_byte_slice_to_word_slice(fragment_data))
+	fragment, fragment_ok := deserialize_fragment(&fragment_reader, recv_stream.temp_allocator)
+	assert(fragment_ok)
+	if !fragment_ok {
+		return false
+	}
+
+	log.info("len(fragment.data): ", len(fragment.data))
+	assert(len(fragment.data) > 0)
+	assert(len(fragment.data) <= MAX_FRAGMENT_SIZE)
+
+	index := get_sequence_index(sequence)
+
+	if recv_stream.realtime_packet_buffer.entries[index].sequence == ENTRY_SENTINEL_VALUE {
+		recv_stream.realtime_packet_buffer.entries[index] = Realtime_Packet_Entry {
+			packet_type = packet_type,
+			sequence = u32(sequence),
+			entry = Fragment_Entry {
+				num_fragments = fragment.header.num_fragments,
+				received_fragments = 1,
+			},
+		}
+
+		mem.copy(
+			&recv_stream.realtime_packet_buffer.entries[index].entry.fragments[fragment.header.fragment_id].data[0],
+			&fragment.data[0],
+			len(fragment.data),
+		)
+
+		recv_stream.realtime_packet_buffer.entries[index].entry.fragments[fragment.header.fragment_id].data_length =
+			len(fragment.data)
+
+		recv_stream.realtime_packet_buffer.entries[index].sequence = u32(sequence)
+
+		// TODO(Thomas): Is this correct?? We'll need more sophisticated handling of this
+		sequence := u32(sequence)
+		if sequence > recv_stream.realtime_packet_buffer.current_sequence {
+			recv_stream.realtime_packet_buffer.current_sequence = sequence
+		}
+
+	} else {
+		recv_stream.realtime_packet_buffer.entries[index].entry.received_fragments += 1
+
+		mem.copy(
+			&recv_stream.realtime_packet_buffer.entries[index].entry.fragments[fragment.header.fragment_id].data[0],
+			&fragment.data[0],
+			len(fragment_data),
+		)
+
+		recv_stream.realtime_packet_buffer.entries[index].entry.fragments[fragment.header.fragment_id].data_length =
+			len(fragment.data)
+
+	}
+
+	return true
+}
+
+@(require_results)
+get_sequence_index :: proc(sequence: u16) -> i32 {
+	return i32(sequence % MAX_ENTRIES)
 }
