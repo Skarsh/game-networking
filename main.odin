@@ -205,16 +205,6 @@ main :: proc() {
 	proto.process_send_stream(&send_stream)
 
 	proto.recv_packet(&recv_stream)
-
-	//packet_bytes, recv_ok := proto.recv_packet(&recv_stream)
-	//assert(recv_ok)
-	//assert(packet_bytes != nil)
-
-	//test_packet_reader := proto.create_reader(proto.convert_byte_slice_to_word_slice(packet_bytes))
-
-	//des_test_packet_a, des_test_packet_ok := deserialize_test_packet_a(&test_packet_reader)
-	//assert(des_test_packet_ok)
-	//assert(des_test_packet_a == test_packet_a)
 }
 
 @(test)

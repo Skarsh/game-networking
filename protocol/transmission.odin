@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:net"
+import "core:testing"
 
 MAX_FRAGMENTS_PER_PACKET :: 256
 MAX_FRAGMENT_SIZE :: 1024
@@ -37,11 +38,8 @@ create_send_stream :: proc(
 	packet_queue := queue.Queue([]u8){}
 	queue.init(&packet_queue, MAX_OUTGOING_PACKETS, allocator)
 
-	address := net.parse_address(address)
-	assert(address != nil)
-
-	socket, bound_socket_err := net.make_bound_udp_socket(address, port)
-	assert(bound_socket_err == nil)
+	socket, socket_ok := create_udp_socket(address, port)
+	assert(socket_ok)
 
 	endpoint_string := fmt.tprintf("%s:%d", endpoint_address, endpoint_port)
 
@@ -102,14 +100,11 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 	assert(len(packet_data) > 0)
 	assert(len(packet_data) <= MAX_PACKET_SIZE)
 
-	log.info("len(packet_data): ", len(packet_data))
-
 	switch qos {
 	case .Best_Effort:
 		fragments := split_packet_into_fragments(packet_data, send_stream.allocator)
 
 		for fragment in fragments {
-			log.info("len(fragment.data): ", len(fragment.data))
 			fragment_buffer := make(
 				[]u32,
 				(size_of(Fragment_Header) + len(fragment.data)) / size_of(u32),
@@ -147,7 +142,6 @@ process_send_stream :: proc(send_stream: ^Send_Stream) {
 
 		bytes_written, err := net.send_udp(send_stream.socket, packet_bytes, send_stream.endpoint)
 
-		log.info("bytes_written: ", bytes_written)
 		assert(err == nil)
 	}
 
@@ -220,11 +214,8 @@ create_recv_stream :: proc(
 	realtime_packet_buffer := new(Realtime_Packet_Buffer, persistent_allocator)
 	init_realtime_packet_buffer(realtime_packet_buffer)
 
-	address := net.parse_address(address)
-	assert(address != nil)
-
-	socket, bound_socket_err := net.make_bound_udp_socket(address, port)
-	assert(bound_socket_err == nil)
+	socket, socket_ok := create_udp_socket(address, port)
+	assert(socket_ok)
 
 	// make the socket non-blocking
 	blocking_err := net.set_blocking(socket, false)
@@ -260,8 +251,6 @@ recv_packet :: proc(recv_stream: ^Recv_Stream) {
 process_packet :: proc(packet_data: []u8, recv_stream: ^Recv_Stream) -> bool {
 	assert(len(packet_data) > 0)
 	assert(len(packet_data) <= MTU)
-
-	log.info("len(packet_data): ", len(packet_data))
 
 	packet_reader := create_reader(convert_byte_slice_to_word_slice(packet_data))
 
@@ -371,4 +360,30 @@ process_fragment :: proc(
 @(require_results)
 get_sequence_index :: proc(sequence: u16) -> i32 {
 	return i32(sequence % MAX_ENTRIES)
+}
+
+create_udp_socket :: proc(address: string, port: int) -> (net.UDP_Socket, bool) {
+	addr := net.parse_address(address)
+	socket, err := net.make_bound_udp_socket(addr, port)
+	return socket, err == nil
+}
+
+@(test)
+test_create_udp_socket :: proc(t: ^testing.T) {
+	socket, ok := create_udp_socket("127.0.0.1", 8080)
+	testing.expect(t, ok, "Failed to create UDP socket")
+	defer net.close(socket)
+}
+
+@(test)
+test_enqueue_packet :: proc(t: ^testing.T) {
+	allocator := context.allocator
+	send_stream := create_send_stream(allocator, "127.0.0.1", 8080, "127.0.0.1", 8081)
+	defer free_send_stream(&send_stream)
+
+	packet_data := []u8{1, 2, 3, 4, 5}
+	enqueue_packet(&send_stream, .Best_Effort, 1, packet_data)
+
+	testing.expect(t, send_stream.current_sequence == 1, "Sequence should be incremented")
+	testing.expect(t, len(send_stream.queue.data) > 0, "Queue should not be empty")
 }
