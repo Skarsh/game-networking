@@ -277,7 +277,6 @@ process_fragment :: proc(
 	assert(len(fragment_data) > 0)
 	assert(len(fragment_data) <= MAX_FRAGMENT_SIZE + size_of(Fragment_Header))
 
-
 	fragment_reader := create_reader(convert_byte_slice_to_word_slice(fragment_data))
 	fragment, fragment_ok := deserialize_fragment(&fragment_reader, recv_stream.temp_allocator)
 	assert(fragment_ok)
@@ -290,8 +289,10 @@ process_fragment :: proc(
 
 	index := get_sequence_index(sequence)
 
-	if recv_stream.realtime_packet_buffer.entries[index].sequence == ENTRY_SENTINEL_VALUE {
-		recv_stream.realtime_packet_buffer.entries[index] = Realtime_Packet_Entry {
+	entry := &recv_stream.realtime_packet_buffer.entries[index]
+
+	if entry.sequence == ENTRY_SENTINEL_VALUE {
+		entry^ = Realtime_Packet_Entry {
 			packet_type = packet_type,
 			sequence = u32(sequence),
 			entry = Fragment_Entry {
@@ -299,36 +300,16 @@ process_fragment :: proc(
 				received_fragments = 1,
 			},
 		}
-
-		mem.copy(
-			&recv_stream.realtime_packet_buffer.entries[index].entry.fragments[fragment.header.fragment_id].data[0],
-			&fragment.data[0],
-			len(fragment.data),
-		)
-
-		recv_stream.realtime_packet_buffer.entries[index].entry.fragments[fragment.header.fragment_id].data_length =
-			len(fragment.data)
-
-		recv_stream.realtime_packet_buffer.entries[index].sequence = u32(sequence)
-
-		// TODO(Thomas): Is this correct?? We'll need more sophisticated handling of this
-		sequence := u32(sequence)
-		if sequence > recv_stream.realtime_packet_buffer.current_sequence {
-			recv_stream.realtime_packet_buffer.current_sequence = sequence
-		}
-
 	} else {
-		recv_stream.realtime_packet_buffer.entries[index].entry.received_fragments += 1
+		entry.entry.received_fragments += 1
+	}
 
-		mem.copy(
-			&recv_stream.realtime_packet_buffer.entries[index].entry.fragments[fragment.header.fragment_id].data[0],
-			&fragment.data[0],
-			len(fragment_data),
-		)
+	fragment_entry := &entry.entry.fragments[fragment.header.fragment_id]
+	fragment_entry.data_length = len(fragment.data)
+	mem.copy(&fragment_entry.data[0], &fragment.data[0], len(fragment.data))
 
-		recv_stream.realtime_packet_buffer.entries[index].entry.fragments[fragment.header.fragment_id].data_length =
-			len(fragment.data)
-
+	if u32(sequence) > recv_stream.realtime_packet_buffer.current_sequence {
+		recv_stream.realtime_packet_buffer.current_sequence = u32(sequence)
 	}
 
 	return true
