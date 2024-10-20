@@ -1,6 +1,7 @@
 package protocol
 
 import "base:runtime"
+import "core:fmt"
 import "core:mem"
 import "core:testing"
 
@@ -265,6 +266,146 @@ split_packet_into_fragments :: proc(
 	}
 
 	return fragments
+}
+
+@(require_results)
+compare_packet :: proc(packet_a: Packet, packet_b: Packet) -> bool {
+	equal_header := packet_a.header == packet_b.header
+	equal_data := mem.compare(packet_a.data, packet_b.data) == 0
+	return equal_header && equal_data
+}
+
+@(require_results)
+compare_fragment_header :: proc(
+	fragment_header_a: Fragment_Header,
+	fragment_header_b: Fragment_Header,
+) -> bool {
+	equal_fragment_size := fragment_header_a.fragment_size == fragment_header_b.fragment_size
+	equal_fragment_id := fragment_header_a.fragment_id == fragment_header_b.fragment_id
+	equal_num_fragments := fragment_header_a.num_fragments == fragment_header_b.num_fragments
+	return equal_fragment_size && equal_fragment_id && equal_num_fragments
+}
+
+@(require_results)
+compare_fragment :: proc(fragment_a: Fragment, fragment_b: Fragment) -> bool {
+	equal_fragment_header := compare_fragment_header(fragment_a.header, fragment_b.header)
+	equal_data := mem.compare(fragment_a.data, fragment_b.data) == 0
+	return equal_fragment_header && equal_data
+
+}
+
+//// ------------- Tests -------------
+
+@(test)
+test_serialize_deserialize_packet_header :: proc(t: ^testing.T) {
+	buffer := make([]u32, 100)
+	defer delete(buffer)
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+
+	packet_header := Packet_Header {
+		crc32       = 72,
+		qos         = u32(QOS.Best_Effort),
+		packet_type = 3,
+		data_length = 14,
+		sequence    = 42,
+	}
+
+	testing.expectf(
+		t,
+		serialize_packet_header(&writer, packet_header),
+		"serialize_packet_header should be successful",
+	)
+
+	testing.expectf(t, flush_bits(&writer), "flush_bits should be successful")
+
+	des_packet_header, des_packet_header_ok := deserialize_packet_header(&reader)
+
+	testing.expectf(t, des_packet_header_ok, "deserialize_packet_header should be successful")
+
+	testing.expect_value(t, des_packet_header, packet_header)
+}
+
+@(test)
+test_serialize_deserialize_packet :: proc(t: ^testing.T) {
+
+	buffer := make([]u32, 100, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+
+	data := make([]u8, 100, context.temp_allocator)
+	for &b in data {
+		b = 42
+	}
+
+	packet_header := Packet_Header {
+		crc32       = 72,
+		qos         = u32(QOS.Best_Effort),
+		packet_type = 2,
+		data_length = u32(len(data)),
+		sequence    = 42,
+	}
+
+	packet := Packet{packet_header, data}
+
+	testing.expectf(t, serialize_packet(&writer, packet), "serialize_packet should be successful")
+
+	testing.expectf(t, flush_bits(&writer), "flush_bits should be successful")
+
+	des_packet, des_packet_ok := deserialize_packet(&reader, context.temp_allocator)
+
+	testing.expectf(t, des_packet_ok, "deserialize_packet should be successful")
+
+	testing.expectf(
+		t,
+		compare_packet(des_packet, packet),
+		fmt.tprintf("expected %v to be equal to %v", packet, des_packet),
+	)
+}
+
+
+@(test)
+test_serialize_deserialize_fragment :: proc(t: ^testing.T) {
+
+	buffer := make([]u32, 100, context.temp_allocator)
+	defer free_all(context.temp_allocator)
+
+	writer := create_writer(buffer)
+	reader := create_reader(buffer)
+
+	data := make([]u8, 100, context.temp_allocator)
+	for &b in data {
+		b = 42
+	}
+
+	fragment := Fragment {
+		header = Fragment_Header {
+			fragment_size = u32(len(data)),
+			fragment_id = 14,
+			num_fragments = 53,
+		},
+		data = data,
+	}
+
+	testing.expectf(
+		t,
+		serialize_fragment(&writer, fragment),
+		"serialize_fragment should be successful",
+	)
+
+	testing.expectf(t, flush_bits(&writer), "flush_bits should be successful")
+
+	des_fragment, des_fragment_ok := deserialize_fragment(&reader, context.temp_allocator)
+
+	testing.expectf(t, des_fragment_ok, "deserialize_fragment should be successful")
+
+	testing.expectf(
+		t,
+		compare_fragment(des_fragment, fragment),
+		fmt.tprintf("expected %v to be equal to %v", fragment, des_fragment),
+	)
 }
 
 @(test)
