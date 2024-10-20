@@ -184,8 +184,6 @@ main :: proc() {
 	test_packet_buffer := make([]u32, size_of(Test_Packet_A) / size_of(u32), context.allocator)
 	defer delete(test_packet_buffer)
 
-	log.info("len(test_packet_buffer) * size_of(u32): ", len(test_packet_buffer) * size_of(u32))
-
 	test_packet_writer := proto.create_writer(test_packet_buffer)
 
 	serialize_test_packet_ok := serialize_test_packet_a(&test_packet_writer, test_packet_a)

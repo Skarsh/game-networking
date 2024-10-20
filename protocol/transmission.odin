@@ -170,28 +170,6 @@ Realtime_Packet_Buffer :: struct {
 	entries:          [MAX_ENTRIES]Realtime_Packet_Entry,
 }
 
-get_realtime_packet_entry :: proc(
-	idx: int,
-	realtime_packet_buffer: ^Realtime_Packet_Buffer,
-) -> (
-	^Realtime_Packet_Entry,
-	bool,
-) {
-	if idx < 0 || idx >= len(realtime_packet_buffer.entries) {
-		return nil, false
-	}
-
-	return &realtime_packet_buffer.entries[idx], true
-}
-
-init_realtime_packet_buffer :: proc(packet_buffer: ^Realtime_Packet_Buffer) {
-	for idx in 0 ..< len(packet_buffer.entries) {
-		entry, entry_ok := get_realtime_packet_entry(idx, packet_buffer)
-		assert(entry_ok)
-		entry.sequence = ENTRY_SENTINEL_VALUE
-	}
-}
-
 // NOTE(Thomas): Think about allocation and how to do them well for the Realtime Packet Buffer
 Recv_Stream :: struct {
 	persistent_allocator:   runtime.Allocator,
@@ -212,7 +190,7 @@ create_recv_stream :: proc(
 	port: int,
 ) -> Recv_Stream {
 	realtime_packet_buffer := new(Realtime_Packet_Buffer, persistent_allocator)
-	init_realtime_packet_buffer(realtime_packet_buffer)
+	for i in 0 ..< len(realtime_packet_buffer.entries) do realtime_packet_buffer.entries[i].sequence = ENTRY_SENTINEL_VALUE
 
 	socket, socket_ok := create_udp_socket(address, port)
 	assert(socket_ok)
@@ -307,7 +285,6 @@ process_fragment :: proc(
 		return false
 	}
 
-	log.info("len(fragment.data): ", len(fragment.data))
 	assert(len(fragment.data) > 0)
 	assert(len(fragment.data) <= MAX_FRAGMENT_SIZE)
 
