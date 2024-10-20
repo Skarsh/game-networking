@@ -1,8 +1,10 @@
 package main
 
+import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/rand"
 import "core:mem"
 import "core:testing"
 
@@ -137,6 +139,68 @@ deserialize_test_packet_c :: proc(bit_reader: ^proto.Bit_Reader) -> (Test_Packet
 	return Test_Packet_C{position = position, velocity = velocity}, true
 }
 
+// ------------- Utility procedures -------------
+
+// TODO(Thomas): This is duplicated from the serialization long running tests
+// should group all these utility procedures somewhere
+random_vector3 :: proc(lo: f32, hi: f32) -> proto.Vector3 {
+	return proto.Vector3 {
+		rand.float32_range(lo, hi),
+		rand.float32_range(lo, hi),
+		rand.float32_range(lo, hi),
+	}
+}
+
+random_test_packet_a :: proc() -> Test_Packet_A {
+	a := rand.int31()
+	b := rand.int31()
+	c := rand.int31()
+	return Test_Packet_A{a = a, b = b, c = c}
+}
+
+random_test_packet_b :: proc() -> Test_Packet_B {
+	test_packet := Test_Packet_B{}
+	for i in 0 ..< len(test_packet.items) {
+		test_packet.items[i] = rand.int31()
+	}
+	return test_packet
+}
+
+random_test_packet_c :: proc(lo: f32, hi: f32) -> Test_Packet_C {
+	position := random_vector3(lo, hi)
+	velocity := random_vector3(lo, hi)
+	return Test_Packet_C{position = position, velocity = velocity}
+}
+
+random_test_packet :: proc(lo: f32, hi: f32) -> Test_Packet {
+	info := type_info_of(Test_Packet)
+	variants_len := 0
+
+	#partial switch v in info.variant {
+	case runtime.Type_Info_Named:
+		#partial switch vv in v.base.variant {
+		case runtime.Type_Info_Union:
+			variants_len = len(vv.variants)
+		case:
+			unreachable()
+		}
+	case:
+		unreachable()
+	}
+
+	random := rand.int_max(variants_len)
+	switch random {
+	case 0:
+		return random_test_packet_a()
+	case 1:
+		return random_test_packet_b()
+	case 2:
+		return random_test_packet_c(lo, hi)
+	case:
+		unreachable()
+	}
+}
+
 main :: proc() {
 
 	track: mem.Tracking_Allocator
@@ -181,51 +245,73 @@ main :: proc() {
 		8001,
 	)
 
-	test_packet_b := Test_Packet_B{}
-	for &b in test_packet_b.items {
-		b = 42
+
+	for {
+		test_packet := random_test_packet(-1000, 1000)
+		test_packet_buffer := make([]u32, size_of(test_packet) / size_of(u32), context.allocator)
+		defer delete(test_packet_buffer)
+
+		test_packet_writer := proto.create_writer(test_packet_buffer)
+
+		serialize_test_packet_ok := serialize_test_packet(&test_packet_writer, test_packet)
+		assert(serialize_test_packet_ok)
+
+		flush_bits_ok := proto.flush_bits(&test_packet_writer)
+
+		test_packet_type_ser := Test_Packet_Type.A
+		switch ty in test_packet {
+		case Test_Packet_A:
+			log.info("ser_test_packet: ", test_packet)
+			test_packet_type_ser = .A
+		case Test_Packet_B:
+			test_packet_type_ser = .B
+		case Test_Packet_C:
+			test_packet_type_ser = .C
+		}
+
+		proto.enqueue_packet(
+			&send_stream,
+			proto.QOS.Best_Effort,
+			u32(test_packet_type_ser),
+			proto.convert_word_slice_to_byte_slice(test_packet_writer.buffer),
+		)
+
+		proto.process_send_stream(&send_stream)
+
+		for proto.recv_packet(&recv_stream) {}
+
+		packet_type, packet_data, packet_data_ok := proto.process_recv_stream(
+			&recv_stream,
+			context.allocator,
+		)
+		assert(packet_data_ok)
+		defer delete(packet_data, context.allocator)
+
+		test_packet_type_des := Test_Packet_Type(packet_type)
+
+		log.info("test_packet_type: ", test_packet_type_des)
+
+		test_packet_reader := proto.create_reader(
+			proto.convert_byte_slice_to_word_slice(packet_data),
+		)
+
+		des_test_packet: Test_Packet
+		des_test_packet_ok := false
+		switch test_packet_type_des {
+		case .A:
+			des_test_packet, des_test_packet_ok = deserialize_test_packet_a(&test_packet_reader)
+			assert(des_test_packet_ok)
+		case .B:
+			des_test_packet, des_test_packet_ok = deserialize_test_packet_b(&test_packet_reader)
+			assert(des_test_packet_ok)
+		case .C:
+			des_test_packet, des_test_packet_ok = deserialize_test_packet_c(&test_packet_reader)
+			assert(des_test_packet_ok)
+		}
+
+		assert(des_test_packet == test_packet)
+
 	}
-
-	test_packet_buffer := make([]u32, size_of(Test_Packet_B) / size_of(u32), context.allocator)
-	defer delete(test_packet_buffer)
-
-	test_packet_writer := proto.create_writer(test_packet_buffer)
-
-	serialize_test_packet_ok := serialize_test_packet_b(&test_packet_writer, test_packet_b)
-	assert(serialize_test_packet_ok)
-
-	flush_bits_ok := proto.flush_bits(&test_packet_writer)
-
-	assert(send_stream.current_sequence == 0)
-	proto.enqueue_packet(
-		&send_stream,
-		proto.QOS.Best_Effort,
-		u32(Test_Packet_Type.C),
-		proto.convert_word_slice_to_byte_slice(test_packet_writer.buffer),
-	)
-	assert(send_stream.current_sequence == 1)
-
-	proto.process_send_stream(&send_stream)
-
-	for proto.recv_packet(&recv_stream) {}
-
-	packet_type, packet_data, packet_data_ok := proto.process_recv_stream(
-		&recv_stream,
-		context.allocator,
-	)
-	assert(packet_data_ok)
-	defer delete(packet_data, context.allocator)
-
-	test_packet_type := Test_Packet_Type(packet_type)
-
-	log.info("test_packet_type: ", test_packet_type)
-
-	test_packet_reader := proto.create_reader(proto.convert_byte_slice_to_word_slice(packet_data))
-
-	des_test_packet_b, des_test_packet_b_ok := deserialize_test_packet_b(&test_packet_reader)
-	assert(des_test_packet_b_ok)
-
-	assert(des_test_packet_b == test_packet_b)
 }
 
 @(test)
