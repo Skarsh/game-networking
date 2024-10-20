@@ -126,6 +126,7 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 				convert_word_slice_to_byte_slice(fragment_writer.buffer),
 			)
 
+			log.info("len of packet_bytes pushed onto queue: ", len(packet_bytes))
 			push_ok, push_err := queue.push_back(&send_stream.queue, packet_bytes)
 			assert(push_ok)
 			assert(push_err == nil)
@@ -138,10 +139,15 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 }
 
 process_send_stream :: proc(send_stream: ^Send_Stream) {
+	log.info("process_send_stream")
 	for packet_bytes in queue.pop_front_safe(&send_stream.queue) {
 
+		log.info("len(packet_bytes): ", len(packet_bytes))
 		bytes_written, err := net.send_udp(send_stream.socket, packet_bytes, send_stream.endpoint)
 
+		if err != nil {
+			log.error("Error when calling 'net.send_udp': ", err)
+		}
 		assert(err == nil)
 	}
 

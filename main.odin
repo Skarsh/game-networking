@@ -236,7 +236,7 @@ main :: proc() {
 	)
 	defer proto.destroy_recv_stream(&recv_stream)
 
-	// TODO(Thomas): Make own allocator here, Arena based
+	// TODO(Thomas): Make own allocator here, Arena based probably
 	send_stream := proto.create_send_stream(
 		context.temp_allocator,
 		"127.0.0.1",
@@ -245,10 +245,27 @@ main :: proc() {
 		8001,
 	)
 
-
+	// TODO(Thomas): Split more of this functionality out
 	for {
 		test_packet := random_test_packet(-1000, 1000)
-		test_packet_buffer := make([]u32, size_of(test_packet) / size_of(u32), context.allocator)
+
+		test_packet_buffer: []u32
+
+		test_packet_type_ser := Test_Packet_Type.A
+		switch ty in test_packet {
+		case Test_Packet_A:
+			test_packet_type_ser = .A
+			test_packet_buffer = make([]u32, size_of(ty) / size_of(u32), context.allocator)
+		case Test_Packet_B:
+			test_packet_type_ser = .B
+			test_packet_buffer = make([]u32, size_of(ty) / size_of(u32), context.allocator)
+		case Test_Packet_C:
+			test_packet_type_ser = .C
+			test_packet_buffer = make([]u32, size_of(ty) / size_of(u32), context.allocator)
+		}
+
+		log.info("Send test packet type", test_packet_type_ser)
+
 		defer delete(test_packet_buffer)
 
 		test_packet_writer := proto.create_writer(test_packet_buffer)
@@ -258,16 +275,6 @@ main :: proc() {
 
 		flush_bits_ok := proto.flush_bits(&test_packet_writer)
 
-		test_packet_type_ser := Test_Packet_Type.A
-		switch ty in test_packet {
-		case Test_Packet_A:
-			log.info("ser_test_packet: ", test_packet)
-			test_packet_type_ser = .A
-		case Test_Packet_B:
-			test_packet_type_ser = .B
-		case Test_Packet_C:
-			test_packet_type_ser = .C
-		}
 
 		proto.enqueue_packet(
 			&send_stream,
@@ -289,7 +296,7 @@ main :: proc() {
 
 		test_packet_type_des := Test_Packet_Type(packet_type)
 
-		log.info("test_packet_type: ", test_packet_type_des)
+		log.info("Recv test packet_type: ", test_packet_type_des)
 
 		test_packet_reader := proto.create_reader(
 			proto.convert_byte_slice_to_word_slice(packet_data),
