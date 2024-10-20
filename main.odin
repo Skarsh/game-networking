@@ -8,6 +8,12 @@ import "core:testing"
 
 import proto "protocol"
 
+Test_Packet_Type :: enum {
+	A,
+	B,
+	C,
+}
+
 Test_Packet_A :: struct {
 	a: i32,
 	b: i32,
@@ -175,18 +181,17 @@ main :: proc() {
 		8001,
 	)
 
-	test_packet_a := Test_Packet_A {
-		a = 1,
-		b = 2,
-		c = 3,
+	test_packet_b := Test_Packet_B{}
+	for &b in test_packet_b.items {
+		b = 42
 	}
 
-	test_packet_buffer := make([]u32, size_of(Test_Packet_A) / size_of(u32), context.allocator)
+	test_packet_buffer := make([]u32, size_of(Test_Packet_B) / size_of(u32), context.allocator)
 	defer delete(test_packet_buffer)
 
 	test_packet_writer := proto.create_writer(test_packet_buffer)
 
-	serialize_test_packet_ok := serialize_test_packet_a(&test_packet_writer, test_packet_a)
+	serialize_test_packet_ok := serialize_test_packet_b(&test_packet_writer, test_packet_b)
 	assert(serialize_test_packet_ok)
 
 	flush_bits_ok := proto.flush_bits(&test_packet_writer)
@@ -195,14 +200,32 @@ main :: proc() {
 	proto.enqueue_packet(
 		&send_stream,
 		proto.QOS.Best_Effort,
-		0,
+		u32(Test_Packet_Type.C),
 		proto.convert_word_slice_to_byte_slice(test_packet_writer.buffer),
 	)
 	assert(send_stream.current_sequence == 1)
 
 	proto.process_send_stream(&send_stream)
 
-	proto.recv_packet(&recv_stream)
+	for proto.recv_packet(&recv_stream) {}
+
+	packet_type, packet_data, packet_data_ok := proto.process_recv_stream(
+		&recv_stream,
+		context.allocator,
+	)
+	assert(packet_data_ok)
+	defer delete(packet_data, context.allocator)
+
+	test_packet_type := Test_Packet_Type(packet_type)
+
+	log.info("test_packet_type: ", test_packet_type)
+
+	test_packet_reader := proto.create_reader(proto.convert_byte_slice_to_word_slice(packet_data))
+
+	des_test_packet_b, des_test_packet_b_ok := deserialize_test_packet_b(&test_packet_reader)
+	assert(des_test_packet_b_ok)
+
+	assert(des_test_packet_b == test_packet_b)
 }
 
 @(test)

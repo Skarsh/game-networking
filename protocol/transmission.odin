@@ -211,19 +211,30 @@ destroy_recv_stream :: proc(recv_stream: ^Recv_Stream) {
 	free(recv_stream.realtime_packet_buffer, recv_stream.persistent_allocator)
 }
 
-recv_packet :: proc(recv_stream: ^Recv_Stream) {
+// TODO(Thomas): Proper error handling, also something else needs
+// to call this continously
+recv_packet :: proc(recv_stream: ^Recv_Stream) -> bool {
 	bytes_read, remote_endpoint, recv_err := net.recv_udp(
 		recv_stream.socket,
 		recv_stream.net_packet_buf[:],
 	)
-	assert(recv_err == nil)
+
+	if (recv_err != nil) {
+		return false
+	}
+
 	// TODO(Thomas): Return false or some error type here?
 	if bytes_read == 0 {
-		return
+		return false
 	}
 
 	ok := process_packet(recv_stream.net_packet_buf[:bytes_read], recv_stream)
 	assert(ok)
+	if (!ok) {
+		return false
+	}
+
+	return true
 }
 
 process_packet :: proc(packet_data: []u8, recv_stream: ^Recv_Stream) -> bool {
@@ -313,6 +324,63 @@ process_fragment :: proc(
 	}
 
 	return true
+}
+
+process_recv_stream :: proc(
+	recv_stream: ^Recv_Stream,
+	allocator: runtime.Allocator,
+) -> (
+	u32,
+	[]u8,
+	bool,
+) {
+	// Process the packet buffer, assemble the fragments into complete 
+	// packets if they are completed, delete fragments that have older
+	// sequence number than the freshest one, etc...
+
+	// NOTE(Thomas): Prune any packets with older sequence number than what we have
+	// by keeping track of them in a valid list?
+
+	// Assemble packet bytes for the packet that is 
+	packet_type, packet_data, packet_data_ok := assemble_fragments(
+		recv_stream.realtime_packet_buffer,
+		allocator,
+	)
+	assert(packet_data_ok)
+
+	return packet_type, packet_data, true
+}
+
+assemble_fragments :: proc(
+	realtime_packet_buffer: ^Realtime_Packet_Buffer,
+	allocator: runtime.Allocator,
+) -> (
+	u32,
+	[]u8,
+	bool,
+) {
+	index := get_sequence_index(u16(realtime_packet_buffer.current_sequence))
+
+	packet_type := realtime_packet_buffer.entries[index].packet_type
+	entry := &realtime_packet_buffer.entries[index].entry
+	num_fragments: u32 = u32(entry.num_fragments)
+	total_size := 0
+
+
+	// Calculate total size
+	for fragment in entry.fragments[:num_fragments] {
+		total_size += fragment.data_length
+	}
+
+	// Allocate and copy data
+	packet_data := make([]u8, total_size, allocator)
+	offset := 0
+	for &fragment in entry.fragments[:num_fragments] {
+		mem.copy(&packet_data[offset], &fragment.data[0], fragment.data_length)
+		offset += fragment.data_length
+	}
+
+	return packet_type, packet_data, true
 }
 
 @(require_results)
