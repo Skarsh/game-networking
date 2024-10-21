@@ -4,6 +4,7 @@ import "base:runtime"
 import queue "core:container/queue"
 import "core:fmt"
 import "core:log"
+import "core:math"
 import "core:mem"
 import "core:net"
 import "core:testing"
@@ -16,7 +17,7 @@ MAX_PACKET_SIZE :: MAX_FRAGMENTS_PER_PACKET * MAX_FRAGMENT_SIZE
 // by 16 bit sequence numbers.
 ENTRY_SENTINEL_VALUE :: 0xFFFF_FFFF
 
-MAX_ENTRIES :: 8
+MAX_ENTRIES :: 256
 
 MAX_OUTGOING_PACKETS :: 8
 
@@ -135,6 +136,7 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 	case .Reliable:
 	}
 
+	log.info("send_stream.current_sequence: ", send_stream.current_sequence)
 	send_stream.current_sequence += 1
 }
 
@@ -285,49 +287,166 @@ process_packet :: proc(packet_data: []u8, recv_stream: ^Recv_Stream) -> bool {
 	return true
 }
 
-process_fragment :: proc(
+advance_packet_buffer_sequence :: proc(
 	sequence: u16,
+	realtime_packet_buffer: ^Realtime_Packet_Buffer,
+) {
+	assert(realtime_packet_buffer.current_sequence <= u32(math.max(u16)))
+	if !sequence_greater_than(sequence, u16(realtime_packet_buffer.current_sequence)) {
+		return
+	}
+
+	oldest_sequence: u16 = sequence - MAX_ENTRIES + 1
+
+	for i in 0 ..< MAX_ENTRIES {
+		exists := realtime_packet_buffer.entries[i].sequence != ENTRY_SENTINEL_VALUE
+		if exists {
+			if sequence_less_than(
+				u16(realtime_packet_buffer.entries[i].sequence),
+				oldest_sequence,
+			) {
+				log.info("Remove old packet entry: ", realtime_packet_buffer.entries[i].sequence)
+				realtime_packet_buffer.entries[i].sequence = ENTRY_SENTINEL_VALUE
+			}
+		}
+	}
+
+	realtime_packet_buffer.current_sequence = u32(sequence)
+}
+
+process_fragment :: proc(
+	packet_sequence: u16,
 	packet_type: u32,
 	fragment_data: []u8,
 	recv_stream: ^Recv_Stream,
 ) -> bool {
+
 	assert(len(fragment_data) > 0)
+	if len(fragment_data) <= 0 {
+		log.error("len(fragment_data) <= 0 - ", len(fragment_data))
+		return false
+	}
+
 	assert(len(fragment_data) <= MAX_FRAGMENT_SIZE + size_of(Fragment_Header))
+	if len(fragment_data) > MAX_FRAGMENT_SIZE + size_of(Fragment_Header) {
+		log.error(
+			"len(fragment_data) > MAX_FRAGMENT_SIZE + size_of(Fragment_Header) - ",
+			len(fragment_data),
+		)
+		return false
+	}
 
 	fragment_reader := create_reader(convert_byte_slice_to_word_slice(fragment_data))
 	fragment, fragment_ok := deserialize_fragment(&fragment_reader, recv_stream.temp_allocator)
 	assert(fragment_ok)
 	if !fragment_ok {
+		log.error("Deserializing fragment failed")
 		return false
 	}
 
 	assert(len(fragment.data) > 0)
-	assert(len(fragment.data) <= MAX_FRAGMENT_SIZE)
+	if len(fragment.data) <= 0 {
+		log.error("len(fragment.data) <= 0 - ", len(fragment.data))
+		return false
+	}
 
-	index := get_sequence_index(sequence)
+	assert(len(fragment.data) <= MAX_FRAGMENT_SIZE)
+	if len(fragment.data) > MAX_FRAGMENT_SIZE {
+		log.error("len(fragment.data) >= max_fragment_size - ", len(fragment.data))
+		return false
+	}
+
+	num_fragments := int(fragment.header.num_fragments)
+
+
+	assert(num_fragments > 0 && num_fragments <= MAX_FRAGMENTS_PER_PACKET)
+	if num_fragments <= 0 || num_fragments > MAX_FRAGMENTS_PER_PACKET {
+		log.error("num fragments is outside of range: ", num_fragments)
+		return false
+	}
+
+	fragment_id := int(fragment.header.fragment_id)
+
+
+	assert(fragment_id >= 0 && fragment_id <= num_fragments)
+	if fragment_id < 0 || fragment_id >= num_fragments {
+		log.error("fragment_id is outside of range: ", fragment_id)
+		return false
+	}
+
+
+	if fragment_id != num_fragments - 1 && len(fragment.data) != MAX_FRAGMENT_SIZE {
+		log.error("Non-last fragment has size not equal to MAX_FRAGMENT_SIZE")
+		return false
+	}
+
+	if sequence_difference(
+		   packet_sequence,
+		   u16(recv_stream.realtime_packet_buffer.current_sequence),
+	   ) >
+	   1024 {
+		log.errorf(
+			"Packet sequence number is wildly out of range - packet_sequence: %v, packet_buffer.current_sequence: ",
+			packet_sequence,
+			recv_stream.realtime_packet_buffer.current_sequence,
+		)
+		return false
+	}
+
+	index := get_sequence_index(packet_sequence)
 
 	entry := &recv_stream.realtime_packet_buffer.entries[index]
 
-	if entry.sequence == ENTRY_SENTINEL_VALUE {
+	exists := entry.sequence != ENTRY_SENTINEL_VALUE
+
+	if exists && entry.sequence != u32(packet_sequence) {
+		log.errorf(
+			"Entry exists but has different sequence number than the fragment - entry.sequence: %d, packet_sequence: %d",
+			entry.sequence,
+			packet_sequence,
+		)
+		return false
+	}
+
+	// TODO(Thomas): Make an array to hold the exists value for each entry instead?
+	if !exists {
+
+		advance_packet_buffer_sequence(packet_sequence, recv_stream.realtime_packet_buffer)
+
 		entry^ = Realtime_Packet_Entry {
 			packet_type = packet_type,
-			sequence = u32(sequence),
+			sequence = u32(packet_sequence),
 			entry = Fragment_Entry {
 				num_fragments = fragment.header.num_fragments,
 				received_fragments = 1,
 			},
 		}
-	} else {
-		entry.entry.received_fragments += 1
 	}
 
-	fragment_entry := &entry.entry.fragments[fragment.header.fragment_id]
-	fragment_entry.data_length = len(fragment.data)
-	mem.copy(&fragment_entry.data[0], &fragment.data[0], len(fragment.data))
+	exists = entry.sequence != ENTRY_SENTINEL_VALUE
 
-	if u32(sequence) > recv_stream.realtime_packet_buffer.current_sequence {
-		recv_stream.realtime_packet_buffer.current_sequence = u32(sequence)
+	assert(exists)
+	assert(entry.sequence == u32(packet_sequence))
+
+	if num_fragments != int(entry.entry.num_fragments) {
+		log.errorf(
+			"Total number of fragments is different for packet than for the entry - packet: %d, entry: %d",
+			num_fragments,
+			entry.entry.num_fragments,
+		)
+		return false
 	}
+
+	assert(fragment_id < num_fragments)
+	assert(fragment_id < MAX_FRAGMENTS_PER_PACKET)
+	assert(num_fragments <= MAX_FRAGMENTS_PER_PACKET)
+
+	fragment_data := &entry.entry.fragments[fragment.header.fragment_id]
+	fragment_data.data_length = len(fragment.data)
+
+	mem.copy(&fragment_data.data[0], &fragment.data[0], len(fragment.data))
+
+	entry.entry.received_fragments += 1
 
 	return true
 }
@@ -365,29 +484,37 @@ assemble_fragments :: proc(
 	[]u8,
 	bool,
 ) {
+	log.info("current_sequence: ", realtime_packet_buffer.current_sequence)
 	index := get_sequence_index(u16(realtime_packet_buffer.current_sequence))
+	log.info("index: ", index)
 
 	packet_type := realtime_packet_buffer.entries[index].packet_type
 	entry := &realtime_packet_buffer.entries[index].entry
 	num_fragments: u32 = u32(entry.num_fragments)
 	total_size := 0
 
-
 	// Calculate total size
 	for fragment in entry.fragments[:num_fragments] {
 		total_size += fragment.data_length
 	}
 
+	log.info("total_size: ", total_size)
+
 	// Allocate and copy data
 	packet_data := make([]u8, total_size, allocator)
 	offset := 0
 	for &fragment in entry.fragments[:num_fragments] {
+		log.info("fragment.data_length: ", fragment.data_length)
 		mem.copy(&packet_data[offset], &fragment.data[0], fragment.data_length)
 		offset += fragment.data_length
 	}
 
+	log.info("packet_type: ", packet_type)
+	log.info("len(packet_data): ", len(packet_data))
 	return packet_type, packet_data, true
 }
+
+// ------------- Utility procedures -------------
 
 @(require_results)
 get_sequence_index :: proc(sequence: u16) -> i32 {
@@ -399,6 +526,8 @@ create_udp_socket :: proc(address: string, port: int) -> (net.UDP_Socket, bool) 
 	socket, err := net.make_bound_udp_socket(addr, port)
 	return socket, err == nil
 }
+
+// ------------- Tests -------------
 
 @(test)
 test_create_udp_socket :: proc(t: ^testing.T) {

@@ -265,6 +265,7 @@ main :: proc() {
 		}
 
 		log.info("Send test packet type", test_packet_type_ser)
+		log.info("Send test packet type (u32):", u32(test_packet_type_ser))
 
 		defer delete(test_packet_buffer)
 
@@ -291,6 +292,7 @@ main :: proc() {
 			&recv_stream,
 			context.allocator,
 		)
+
 		assert(packet_data_ok)
 		defer delete(packet_data, context.allocator)
 
@@ -316,8 +318,8 @@ main :: proc() {
 			assert(des_test_packet_ok)
 		}
 
-		assert(des_test_packet == test_packet)
 
+		assert(des_test_packet == test_packet)
 	}
 }
 
