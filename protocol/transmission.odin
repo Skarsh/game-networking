@@ -21,6 +21,13 @@ MAX_ENTRIES :: 256
 
 MAX_OUTGOING_PACKETS :: 8
 
+// TODO(Thomas): Find a better name for this
+// The packet data type returned back to the caller / user
+Packet_Data :: struct {
+	type: u32,
+	data: []u8,
+}
+
 Send_Stream :: struct {
 	allocator:        runtime.Allocator,
 	queue:            queue.Queue([]u8),
@@ -456,8 +463,7 @@ process_recv_stream :: proc(
 	recv_stream: ^Recv_Stream,
 	allocator: runtime.Allocator,
 ) -> (
-	u32,
-	[]u8,
+	Packet_Data,
 	bool,
 ) {
 	// Process the packet buffer, assemble the fragments into complete 
@@ -468,21 +474,20 @@ process_recv_stream :: proc(
 	// by keeping track of them in a valid list?
 
 	// Assemble packet bytes for the packet that is 
-	packet_type, packet_data, packet_data_ok := assemble_fragments(
+	packet_data, packet_data_ok := assemble_fragments(
 		recv_stream.realtime_packet_buffer,
 		allocator,
 	)
 	assert(packet_data_ok)
 
-	return packet_type, packet_data, true
+	return packet_data, true
 }
 
 assemble_fragments :: proc(
 	realtime_packet_buffer: ^Realtime_Packet_Buffer,
 	allocator: runtime.Allocator,
 ) -> (
-	u32,
-	[]u8,
+	Packet_Data,
 	bool,
 ) {
 	log.info("current_sequence: ", realtime_packet_buffer.current_sequence)
@@ -502,17 +507,21 @@ assemble_fragments :: proc(
 	log.info("total_size: ", total_size)
 
 	// Allocate and copy data
-	packet_data := make([]u8, total_size, allocator)
+	data := make([]u8, total_size, allocator)
+	packet_data := Packet_Data {
+		type = packet_type,
+		data = data,
+	}
 	offset := 0
 	for &fragment in entry.fragments[:num_fragments] {
 		log.info("fragment.data_length: ", fragment.data_length)
-		mem.copy(&packet_data[offset], &fragment.data[0], fragment.data_length)
+		mem.copy(&packet_data.data[offset], &fragment.data[0], fragment.data_length)
 		offset += fragment.data_length
 	}
 
 	log.info("packet_type: ", packet_type)
-	log.info("len(packet_data): ", len(packet_data))
-	return packet_type, packet_data, true
+	log.info("len(packet_data): ", len(packet_data.data))
+	return packet_data, true
 }
 
 // ------------- Utility procedures -------------

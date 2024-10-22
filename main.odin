@@ -288,20 +288,17 @@ main :: proc() {
 
 		for proto.recv_packet(&recv_stream) {}
 
-		packet_type, packet_data, packet_data_ok := proto.process_recv_stream(
-			&recv_stream,
-			context.allocator,
-		)
+		packet_data, packet_data_ok := proto.process_recv_stream(&recv_stream, context.allocator)
 
 		assert(packet_data_ok)
-		defer delete(packet_data, context.allocator)
+		defer delete(packet_data.data, context.allocator)
 
-		test_packet_type_des := Test_Packet_Type(packet_type)
+		test_packet_type_des := Test_Packet_Type(packet_data.type)
 
 		log.info("Recv test packet_type: ", test_packet_type_des)
 
 		test_packet_reader := proto.create_reader(
-			proto.convert_byte_slice_to_word_slice(packet_data),
+			proto.convert_byte_slice_to_word_slice(packet_data.data),
 		)
 
 		des_test_packet: Test_Packet
