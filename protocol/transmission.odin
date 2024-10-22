@@ -306,8 +306,9 @@ advance_packet_buffer_sequence :: proc(
 				oldest_sequence,
 			) {
 				log.info("Remove old packet entry: ", realtime_packet_buffer.entries[i].sequence)
-				realtime_packet_buffer.entries[i].sequence = ENTRY_SENTINEL_VALUE
 			}
+
+			realtime_packet_buffer.entries[i].sequence = ENTRY_SENTINEL_VALUE
 		}
 	}
 
