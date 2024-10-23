@@ -1,6 +1,7 @@
 package protocol
 
 import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:math/rand"
 import "core:mem"
@@ -59,12 +60,19 @@ write_bits :: proc(writer: ^Bit_Writer, value: u32, bits: u32) -> bool {
 		return true
 	}
 
-	if bits < 0 || bits > 32 {
+	if bits < 0 {
+		log.error("bits < 0")
+		return false
+	}
+
+	if bits > 32 {
+		log.error("bits > 32")
 		return false
 	}
 
 	// Check if writing these bits would exceed max_bits
-	if writer.word_index * 32 + writer.scratch_bits + bits > writer.num_bits {
+	if (writer.word_index * 32 + writer.scratch_bits + bits) > writer.num_bits {
+		log.error("(writer.word_index * 32 + writer.scratch_bits + bits) > writer.num_bits")
 		return false
 	}
 
@@ -107,7 +115,8 @@ flush_bits :: proc(writer: ^Bit_Writer) -> bool {
 
 	// If we have surpassed the max amounts that can possibly be written
 	// to the writer we return false.
-	if writer.word_index * 32 + writer.scratch_bits > writer.num_bits {
+	if (writer.word_index * 32 + writer.scratch_bits) > writer.num_bits {
+		log.error("writer.word_index * 32 + writer.scratch_bits) > writer.num_bits")
 		return false
 	}
 
@@ -132,6 +141,7 @@ write_align :: proc(writer: ^Bit_Writer) -> bool {
 
 		assert((writer.bits_written % 8) == 0)
 		if writer.bits_written % 8 != 0 {
+			log.error("writer.bits_written % 8 != 0")
 			return false
 		}
 
@@ -148,12 +158,14 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	bits_left_until_alignment := get_align_bits(writer.bits_written)
 	assert(bits_left_until_alignment == 0)
 	if bits_left_until_alignment != 0 {
+		log.error("bits_left_until_alignment != 0")
 		return false
 	}
 
 	target_bits_to_write := writer.bits_written + (bytes * 8)
 	assert(target_bits_to_write <= writer.num_bits)
 	if target_bits_to_write > writer.num_bits {
+		log.error("target_bits_to_write > writer.num_bits")
 		return false
 	}
 
@@ -166,6 +178,7 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	for i in 0 ..< head_bytes {
 		if !write_bits(writer, u32(data[i]), 8) {
 			// TODO(Thomas): Flipping this is not caught in any tests
+			log.error("write_bits(writer, u32(data[i]), 8) returns false")
 			return false
 		}
 	}
@@ -179,6 +192,7 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	}
 
 	if !flush_bits(writer) {
+		log.error("flush_bits(writer) returns false")
 		// TODO(Thomas): Fliiping this is not caught in tests
 		return false
 	}
@@ -187,6 +201,7 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 
 	assert(bits_left_until_alignment == 0)
 	if bits_left_until_alignment != 0 {
+		log.error("bits_left_until_alignment != 0")
 		return false
 	}
 
@@ -195,6 +210,7 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 
 		assert(writer.bits_written % 32 == 0)
 		if writer.bits_written % 32 != 0 {
+			log.error("writer.bits_written % 32 != 0")
 			return false
 		}
 
@@ -208,6 +224,7 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	bits_left_until_alignment = get_align_bits(writer.bits_written)
 	assert(bits_left_until_alignment == 0)
 	if bits_left_until_alignment != 0 {
+		log.error("bits_left_until_alignment != 0")
 		return false
 	}
 
@@ -215,12 +232,19 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	tail_bytes := bytes - tail_start
 
 	assert(tail_bytes >= 0 && tail_bytes < 4)
-	if tail_bytes < 0 || tail_bytes >= 4 {
+	if tail_bytes < 0 {
+		log.error("tail_bytes < 0")
+		return false
+	}
+
+	if tail_bytes >= 4 {
+		log.error("tail_bytes >= 4")
 		return false
 	}
 
 	for i in 0 ..< tail_bytes {
 		if !write_bits(writer, u32(data[tail_start + i]), 8) {
+			log.error("write_bits(writer, u32(data[tail_start + i]), 8) returns false")
 			return false
 		}
 	}
@@ -228,11 +252,13 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	bits_left_until_alignment = get_align_bits(writer.bits_written)
 	assert(bits_left_until_alignment == 0)
 	if bits_left_until_alignment != 0 {
+		log.error("bits_left_until_alignment != 0")
 		return false
 	}
 
 	assert(head_bytes + (num_words * 4) + tail_bytes == bytes)
 	if head_bytes + (num_words * 4) + tail_bytes != bytes {
+		log.error("head_bytes + (num_words * 4) + tail_bytes != bytes")
 		return false
 	}
 
@@ -351,15 +377,23 @@ read_bits :: proc(reader: ^Bit_Reader, bits: u32) -> (u32, bool) {
 		return 0, true
 	}
 
-	if bits < 0 || bits > 32 {
+	if bits < 0 {
+		log.error("bits < 0")
 		return 0, false
 	}
 
-	if bits > 32 || reader.bits_read + bits > reader.num_bits {
+	if bits > 32 {
+		log.error("bits > 32")
+		return 0, false
+	}
+
+	if reader.bits_read + bits > reader.num_bits {
+		log.error("reader.bits_read + bits > reader.num_bits")
 		return 0, false
 	}
 
 	if reader.word_index > u32(len(reader.buffer)) {
+		log.error("reader.word_index > len(reader.buffer)")
 		return 0, false
 	}
 
@@ -392,12 +426,18 @@ read_align :: proc(reader: ^Bit_Reader) -> bool {
 	if remainder_bits != 0 {
 		value, success := read_bits(reader, 8 - remainder_bits)
 		if !success {
+			log.error("read_bits(reader, 8 - remainder_bits) returns false")
 			return false
 		}
 
 		assert(reader.bits_read % 8 == 0)
+		if reader.bits_read % 8 != 0 {
+			log.error("reader.bits_read % 8 != 0")
+			return false
+		}
 
 		if value != 0 {
+			log.error("value != 0")
 			return false
 		}
 	}
@@ -411,10 +451,15 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 
 	assert(bits_left_until_alignment == 0)
 	if bits_left_until_alignment != 0 {
+		log.error("bits_left_until_alignment != 0")
 		return false
 	}
 
 	assert(reader.bits_read + bytes * 8 <= reader.num_bits)
+	if reader.bits_read + bytes * 8 > reader.num_bits {
+		log.error("reader.bits_read + bytes * 8 > reader.num_bits")
+		return false
+	}
 
 	head_bytes := calculate_head_bytes(reader.bits_read)
 	// If the number of bytes up to the next word boundary
@@ -427,6 +472,7 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 		value, success := read_bits(reader, 8)
 		if !success {
 			// TODO(Thomas): Flipping this does not change outcome of unit tests
+			log.error("read_bits(reader, 8) returns false")
 			return false
 		}
 		// Safety: safe to cast to u8 since we only read 8 bits 
@@ -442,6 +488,7 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	bits_left_until_alignment = get_align_bits(reader.bits_read)
 	assert(bits_left_until_alignment == 0)
 	if bits_left_until_alignment != 0 {
+		log.error("bits_left_until_alignment != 0")
 		return false
 	}
 
@@ -450,6 +497,7 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	if num_words > 0 {
 		assert((reader.bits_read % 32) == 0)
 		if reader.bits_read % 32 != 0 {
+			log.error("reader.bits_read % 32 != 0")
 			return false
 		}
 
@@ -462,19 +510,28 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	bits_left_until_alignment = get_align_bits(reader.bits_read)
 	assert(bits_left_until_alignment == 0)
 	if bits_left_until_alignment != 0 {
+		log.error("bits_left_until_alignment != 0")
 		return false
 	}
 
 	tail_start := head_bytes + num_words * 4
 	tail_bytes := bytes - tail_start
 	assert(tail_bytes >= 0 && tail_bytes < 4)
-	if tail_bytes < 0 || tail_bytes >= 4 {
+
+	if tail_bytes < 0 {
+		log.error("tail_bytes < 0")
+		return false
+	}
+
+	if tail_bytes >= 4 {
+		log.error("tail_bytes >= 4")
 		return false
 	}
 
 	for i in 0 ..< tail_bytes {
 		value, success := read_bits(reader, 8)
 		if !success {
+			log.error("read_bits(reader, 8) returns false")
 			return false
 		}
 		// Safety: Safe to cast to u8 here since we only read 8 bits into value
@@ -484,11 +541,13 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	bits_left_until_alignment = get_align_bits(reader.bits_read)
 	assert(bits_left_until_alignment == 0)
 	if bits_left_until_alignment != 0 {
+		log.error("bits_left_until_alignment != 0")
 		return false
 	}
 
 	assert((head_bytes + num_words * 4 + tail_bytes) == bytes)
 	if (head_bytes + num_words * 4 + tail_bytes) != bytes {
+		log.error("head_bytes + num_words * 4 + tail_bytes) != bytes")
 		return false
 	}
 
@@ -517,6 +576,7 @@ calculate_head_bytes :: proc(num_bits: u32) -> u32 {
 	head_bytes := (4 - (num_bits % 32) / 8) % 4
 	return head_bytes
 }
+
 
 @(test)
 test_write_zero_and_zero_bits :: proc(t: ^testing.T) {
@@ -621,7 +681,16 @@ test_write_partial_bits :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_overflow_protection :: proc(t: ^testing.T) {
+test_write_overflow_protection :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	buffer := make([]u32, 100)
 	defer delete(buffer)
 	writer := create_writer(buffer)
@@ -697,6 +766,15 @@ test_write_flush :: proc(t: ^testing.T) {
 
 @(test)
 test_write_flush_on_last_word :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	buffer := make([]u32, 100)
 	defer delete(buffer)
 	writer := create_writer(buffer)
@@ -901,6 +979,15 @@ test_read_partial_bits :: proc(t: ^testing.T) {
 
 @(test)
 test_read_overflow_protection :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	buffer := []u32{0xFFFF_FFFF}
 	reader := create_reader(buffer[:])
 
@@ -944,6 +1031,15 @@ test_read_mixed_bit_lengths :: proc(t: ^testing.T) {
 
 @(test)
 test_read_exact_buffer_size :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	buffer := []u32{0xAAAA_AAAA, 0xBBBB_BBBB}
 	reader := create_reader(buffer[:])
 
@@ -962,6 +1058,15 @@ test_read_exact_buffer_size :: proc(t: ^testing.T) {
 
 @(test)
 test_read_large_bit_count :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	buffer := []u32{0xAAAA_AAAA, 0xBBBB_BBBB}
 	reader := create_reader(buffer[:])
 
@@ -974,6 +1079,15 @@ test_read_large_bit_count :: proc(t: ^testing.T) {
 
 @(test)
 test_read_empty_buffer :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	buffer := []u32{}
 	reader := create_reader(buffer[:])
 
@@ -1002,6 +1116,15 @@ test_read_multiple_small_reads :: proc(t: ^testing.T) {
 
 @(test)
 test_read_bits_after_full_read :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	buffer := []u32{0xAAAA_AAAA}
 	reader := create_reader(buffer[:])
 
@@ -1119,6 +1242,15 @@ test_write_then_read_mixed_bit_lengths :: proc(t: ^testing.T) {
 
 @(test)
 test_write_then_read_full_buffer :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	buffer := []u32{0, 0}
 
 	writer := create_writer(buffer)
@@ -1161,6 +1293,15 @@ test_read_align_one_bit :: proc(t: ^testing.T) {
 
 @(test)
 test_read_align_two_bit_set_should_fail :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	buffer := []u32{0b0010_0001}
 	reader := create_reader(buffer)
 
