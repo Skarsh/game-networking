@@ -129,7 +129,12 @@ write_align :: proc(writer: ^Bit_Writer) -> bool {
 	remainder_bits := writer.bits_written % 8
 	if remainder_bits != 0 {
 		success := write_bits(writer, 0, 8 - remainder_bits)
+
 		assert((writer.bits_written % 8) == 0)
+		if writer.bits_written % 8 != 0 {
+			return false
+		}
+
 		return success
 	}
 	return true
@@ -140,9 +145,17 @@ write_align :: proc(writer: ^Bit_Writer) -> bool {
 write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 	bytes := u32(len(data))
 
-	assert(get_align_bits(writer.bits_written) == 0)
+	bits_left_until_alignment := get_align_bits(writer.bits_written)
+	assert(bits_left_until_alignment == 0)
+	if bits_left_until_alignment != 0 {
+		return false
+	}
+
 	target_bits_to_write := writer.bits_written + (bytes * 8)
 	assert(target_bits_to_write <= writer.num_bits)
+	if target_bits_to_write > writer.num_bits {
+		return false
+	}
 
 	head_bytes := calculate_head_bytes(writer.bits_written)
 	if head_bytes > bytes {
@@ -170,11 +183,21 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 		return false
 	}
 
-	assert(get_align_bits(writer.bits_written) == 0)
+	bits_left_until_alignment = get_align_bits(writer.bits_written)
+
+	assert(bits_left_until_alignment == 0)
+	if bits_left_until_alignment != 0 {
+		return false
+	}
 
 	num_words := (bytes - head_bytes) / 4
 	if num_words > 0 {
+
 		assert(writer.bits_written % 32 == 0)
+		if writer.bits_written % 32 != 0 {
+			return false
+		}
+
 		copy_len := int(num_words) * 4
 		mem.copy(&writer.buffer[writer.word_index], &data[head_bytes], copy_len)
 		writer.bits_written += num_words * 32
@@ -182,18 +205,36 @@ write_bytes :: proc(writer: ^Bit_Writer, data: []u8) -> bool {
 		writer.scratch = 0
 	}
 
-	assert(get_align_bits(writer.bits_written) == 0)
+	bits_left_until_alignment = get_align_bits(writer.bits_written)
+	assert(bits_left_until_alignment == 0)
+	if bits_left_until_alignment != 0 {
+		return false
+	}
+
 	tail_start := head_bytes + (num_words * 4)
 	tail_bytes := bytes - tail_start
+
 	assert(tail_bytes >= 0 && tail_bytes < 4)
+	if tail_bytes < 0 || tail_bytes >= 4 {
+		return false
+	}
+
 	for i in 0 ..< tail_bytes {
 		if !write_bits(writer, u32(data[tail_start + i]), 8) {
 			return false
 		}
 	}
 
-	assert(get_align_bits(writer.bits_written) == 0)
+	bits_left_until_alignment = get_align_bits(writer.bits_written)
+	assert(bits_left_until_alignment == 0)
+	if bits_left_until_alignment != 0 {
+		return false
+	}
+
 	assert(head_bytes + (num_words * 4) + tail_bytes == bytes)
+	if head_bytes + (num_words * 4) + tail_bytes != bytes {
+		return false
+	}
 
 	return true
 }
@@ -366,7 +407,13 @@ read_align :: proc(reader: ^Bit_Reader) -> bool {
 @(require_results)
 read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	// NOTE: We assume that we're on byte alignment
-	assert(get_align_bits(reader.bits_read) == 0)
+	bits_left_until_alignment := get_align_bits(reader.bits_read)
+
+	assert(bits_left_until_alignment == 0)
+	if bits_left_until_alignment != 0 {
+		return false
+	}
+
 	assert(reader.bits_read + bytes * 8 <= reader.num_bits)
 
 	head_bytes := calculate_head_bytes(reader.bits_read)
@@ -392,23 +439,39 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 		return true
 	}
 
-	assert(get_align_bits(reader.bits_read) == 0)
+	bits_left_until_alignment = get_align_bits(reader.bits_read)
+	assert(bits_left_until_alignment == 0)
+	if bits_left_until_alignment != 0 {
+		return false
+	}
 
 	num_words := (bytes - head_bytes) / 4
 	copy_len := int(num_words) * 4
 	if num_words > 0 {
 		assert((reader.bits_read % 32) == 0)
+		if reader.bits_read % 32 != 0 {
+			return false
+		}
+
 		mem.copy(&data[head_bytes], &reader.buffer[reader.word_index], copy_len)
 		reader.bits_read += num_words * 32
 		reader.word_index += num_words
 		reader.scratch_bits = 0
 	}
 
-	assert(get_align_bits(reader.num_bits) == 0)
+	bits_left_until_alignment = get_align_bits(reader.bits_read)
+	assert(bits_left_until_alignment == 0)
+	if bits_left_until_alignment != 0 {
+		return false
+	}
 
 	tail_start := head_bytes + num_words * 4
 	tail_bytes := bytes - tail_start
 	assert(tail_bytes >= 0 && tail_bytes < 4)
+	if tail_bytes < 0 || tail_bytes >= 4 {
+		return false
+	}
+
 	for i in 0 ..< tail_bytes {
 		value, success := read_bits(reader, 8)
 		if !success {
@@ -418,8 +481,16 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 		data[tail_start + i] = u8(value)
 	}
 
-	assert(get_align_bits(reader.num_bits) == 0)
+	bits_left_until_alignment = get_align_bits(reader.bits_read)
+	assert(bits_left_until_alignment == 0)
+	if bits_left_until_alignment != 0 {
+		return false
+	}
+
 	assert((head_bytes + num_words * 4 + tail_bytes) == bytes)
+	if (head_bytes + num_words * 4 + tail_bytes) != bytes {
+		return false
+	}
 
 	return true
 }

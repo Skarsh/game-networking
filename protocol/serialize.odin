@@ -105,8 +105,20 @@ deserialize_u32 :: proc(bit_reader: ^Bit_Reader) -> (u32, bool) {
 @(require_results)
 serialize_integer :: proc(bit_writer: ^Bit_Writer, value, min, max: i32) -> bool {
 	assert(min < max, fmt.tprintf("assumed min %v is smaller than max %v", min, max))
+	if min >= max {
+		return false
+	}
+
 	assert(value >= min, fmt.tprintf("assumed value %v >= min %v", value, min))
+	if value < min {
+		return false
+	}
+
 	assert(value <= max, fmt.tprintf("assumed value %v <= max %v", value, max))
+	if value > max {
+		return false
+	}
+
 	bits := bits_required(min, max)
 	unsigned_value := u32(value - min)
 	return write_bits(bit_writer, unsigned_value, u32(bits))
@@ -115,6 +127,10 @@ serialize_integer :: proc(bit_writer: ^Bit_Writer, value, min, max: i32) -> bool
 @(require_results)
 deserialize_integer :: proc(bit_reader: ^Bit_Reader, min: i32, max: i32) -> (i32, bool) {
 	assert(min < max)
+	if min >= max {
+		return 0, false
+	}
+
 	bits := bits_required(min, max)
 	unsigned_value, success := read_bits(bit_reader, u32(bits))
 	if !success {
@@ -175,7 +191,15 @@ serialize_compressed_float :: proc(
 	resolution: f32,
 ) -> bool {
 	assert(min < max, fmt.tprintf("assumed min %v is smaller than max %v", min, max))
+	if min >= max {
+		return false
+	}
+
 	assert(resolution != 0.0, fmt.tprintf("assumed resolution is not equal to 0.0"))
+	if resolution == 0.0 {
+		return false
+	}
+
 	// Example 
 	// value = 15
 	// min = 10
@@ -230,7 +254,14 @@ deserialize_compressed_float :: proc(
 	bool,
 ) {
 	assert(min < max, fmt.tprintf("assumed min %v is smaller than max %v", min, max))
+	if min >= max {
+		return 0, false
+	}
+
 	assert(resolution != 0.0, fmt.tprintf("assumed resolution is not equal to 0.0"))
+	if resolution == 0.0 {
+		return 0, false
+	}
 
 	// Example - continuing from the serialization above
 	// min = 10
@@ -454,6 +485,10 @@ deserialize_align :: proc(bit_reader: ^Bit_Reader) -> bool {
 serialize_bytes :: proc(bit_writer: ^Bit_Writer, data: []u8) -> bool {
 	// TODO(Thomas): Swap out assert with if statment
 	assert(len(data) > 0)
+	if len(data) <= 0 {
+		return false
+	}
+
 	serialize_align(bit_writer) or_return
 	return write_bytes(bit_writer, data)
 }
@@ -461,7 +496,15 @@ serialize_bytes :: proc(bit_writer: ^Bit_Writer, data: []u8) -> bool {
 @(require_results)
 deserialize_bytes :: proc(bit_reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 	assert(len(data) > 0)
+	if len(data) <= 0 {
+		return false
+	}
+
 	assert(bytes > 0)
+	if bytes <= 0 {
+		return false
+	}
+
 	deserialize_align(bit_reader) or_return
 	return read_bytes(bit_reader, data, bytes)
 }
@@ -474,7 +517,12 @@ serialize_string :: proc(bit_writer: ^Bit_Writer, str: string) -> bool {
 	str_bytes := transmute([]u8)str
 	str_length := i32(len(str_bytes))
 	buffer_size := i32(len(bit_writer.buffer))
+
 	assert(str_length < buffer_size - 1)
+	if str_length >= buffer_size - 1 {
+		return false
+	}
+
 	serialize_integer(bit_writer, str_length, 0, buffer_size - 1) or_return
 	serialize_bytes(bit_writer, str_bytes) or_return
 
@@ -508,6 +556,10 @@ deserialize_string :: proc(
 	// the number of bytes should always be > 0. Lets assert to be sure.
 	// TODO(Thomas): Remove when stabilized?
 	assert(str_len > 0)
+	if str_len <= 0 {
+		return "", false
+	}
+
 	str_success := deserialize_bytes(bit_reader, str_bytes[:], u32(str_len))
 	if !str_success {
 		return "", false
