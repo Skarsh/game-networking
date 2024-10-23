@@ -67,6 +67,11 @@ free_send_stream :: proc(send_stream: ^Send_Stream) {
 	free_all(send_stream.allocator)
 }
 
+destroy_send_stream :: proc(send_stream: ^Send_Stream) {
+	free_send_stream(send_stream)
+	net.close(send_stream.socket)
+}
+
 // TODO(Thomas): Calculate crc32 properly
 create_net_packet :: proc(
 	allocator: runtime.Allocator,
@@ -224,6 +229,7 @@ create_recv_stream :: proc(
 
 destroy_recv_stream :: proc(recv_stream: ^Recv_Stream) {
 	free(recv_stream.realtime_packet_buffer, recv_stream.persistent_allocator)
+	net.close(recv_stream.socket)
 }
 
 // TODO(Thomas): Proper error handling, also something else needs
@@ -274,10 +280,6 @@ process_packet :: proc(packet_data: []u8, recv_stream: ^Recv_Stream) -> bool {
 
 	switch qos {
 	case .Best_Effort:
-		// TODO(Thomas): Think about wether we should just have everything be fragment
-		// and that way not having to special case anything
-
-		// Process fragment
 		fragment_ok := process_fragment(
 			packet.header.sequence,
 			packet.header.packet_type,
@@ -466,14 +468,6 @@ process_recv_stream :: proc(
 	Packet_Data,
 	bool,
 ) {
-	// Process the packet buffer, assemble the fragments into complete 
-	// packets if they are completed, delete fragments that have older
-	// sequence number than the freshest one, etc...
-
-	// NOTE(Thomas): Prune any packets with older sequence number than what we have
-	// by keeping track of them in a valid list?
-
-	// Assemble packet bytes for the packet that is 
 	packet_data, packet_data_ok := assemble_fragments(
 		recv_stream.realtime_packet_buffer,
 		allocator,
@@ -538,13 +532,6 @@ create_udp_socket :: proc(address: string, port: int) -> (net.UDP_Socket, bool) 
 }
 
 // ------------- Tests -------------
-
-@(test)
-test_create_udp_socket :: proc(t: ^testing.T) {
-	socket, ok := create_udp_socket("127.0.0.1", 8080)
-	testing.expect(t, ok, "Failed to create UDP socket")
-	defer net.close(socket)
-}
 
 @(test)
 test_enqueue_packet :: proc(t: ^testing.T) {

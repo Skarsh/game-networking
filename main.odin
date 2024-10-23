@@ -244,6 +244,7 @@ main :: proc() {
 		"127.0.0.1",
 		8001,
 	)
+	defer proto.destroy_send_stream(&send_stream)
 
 	// TODO(Thomas): Split more of this functionality out
 	for {
