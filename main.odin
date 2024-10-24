@@ -45,9 +45,20 @@ serialize_test_packet_a :: proc(
 	bit_writer: ^proto.Bit_Writer,
 	test_packet: Test_Packet_A,
 ) -> bool {
-	proto.serialize_integer(bit_writer, test_packet.a, math.min(i32), math.max(i32)) or_return
-	proto.serialize_integer(bit_writer, test_packet.b, math.min(i32), math.max(i32)) or_return
-	proto.serialize_integer(bit_writer, test_packet.c, math.min(i32), math.max(i32)) or_return
+	if !proto.serialize_integer(bit_writer, test_packet.a, math.min(i32), math.max(i32)) {
+		log.error("failed to serialize field `a` of Test_Packet_A")
+		return false
+	}
+
+	if !proto.serialize_integer(bit_writer, test_packet.b, math.min(i32), math.max(i32)) {
+		log.error("failed to serialize field `b` of Test_Packet_A")
+		return false
+	}
+
+	if !proto.serialize_integer(bit_writer, test_packet.c, math.min(i32), math.max(i32)) {
+		log.error("failed to serialize field `c` of Test_Packet_A")
+		return false
+	}
 
 	return true
 }
@@ -58,7 +69,10 @@ serialize_test_packet_b :: proc(
 	test_packet: Test_Packet_B,
 ) -> bool {
 	for item in test_packet.items {
-		proto.serialize_integer(bit_writer, item, math.min(i32), math.max(i32)) or_return
+		if !proto.serialize_integer(bit_writer, item, math.min(i32), math.max(i32)) {
+			log.error("failed to serialize item of Test_Packet_B")
+			return false
+		}
 	}
 
 	return true
@@ -69,8 +83,15 @@ serialize_test_packet_c :: proc(
 	bit_writer: ^proto.Bit_Writer,
 	test_packet: Test_Packet_C,
 ) -> bool {
-	proto.serialize_vector3(bit_writer, test_packet.position) or_return
-	proto.serialize_vector3(bit_writer, test_packet.velocity) or_return
+	if !proto.serialize_vector3(bit_writer, test_packet.position) {
+		log.error("failed to serialize position of Test_Packet_C")
+		return false
+	}
+
+	if !proto.serialize_vector3(bit_writer, test_packet.velocity) {
+		log.error("failed to serialize velocity of Test_Packet_C")
+		return false
+	}
 
 	return true
 }
@@ -94,16 +115,19 @@ serialize_test_packet :: proc(bit_writer: ^proto.Bit_Writer, test_packet: Test_P
 deserialize_test_packet_a :: proc(bit_reader: ^proto.Bit_Reader) -> (Test_Packet_A, bool) {
 	a, a_ok := proto.deserialize_integer(bit_reader, math.min(i32), math.max(i32))
 	if !a_ok {
+		log.error("failed to deserialize field `a` of Test_Packet_A")
 		return Test_Packet_A{}, false
 	}
 
 	b, b_ok := proto.deserialize_integer(bit_reader, math.min(i32), math.max(i32))
 	if !b_ok {
+		log.error("failed to deserialize field `b` of Test_Packet_A")
 		return Test_Packet_A{}, false
 	}
 
 	c, c_ok := proto.deserialize_integer(bit_reader, math.min(i32), math.max(i32))
 	if !c_ok {
+		log.error("failed to deserialize field `c` of Test_Packet_A")
 		return Test_Packet_A{}, false
 	}
 
@@ -116,6 +140,7 @@ deserialize_test_packet_b :: proc(bit_reader: ^proto.Bit_Reader) -> (Test_Packet
 	for i in 0 ..< len(test_packet.items) {
 		item, ok := proto.deserialize_integer(bit_reader, math.min(i32), math.max(i32))
 		if !ok {
+			log.error("failed to deserialize item of Test_Packet_B")
 			return Test_Packet_B{}, false
 		}
 		test_packet.items[i] = item
@@ -128,12 +153,13 @@ deserialize_test_packet_b :: proc(bit_reader: ^proto.Bit_Reader) -> (Test_Packet
 deserialize_test_packet_c :: proc(bit_reader: ^proto.Bit_Reader) -> (Test_Packet_C, bool) {
 	position, position_ok := proto.deserialize_vector3(bit_reader)
 	if !position_ok {
+		log.error("failed to deserialize position of Test_Packet_C")
 		return Test_Packet_C{}, false
 	}
 
 	velocity, velocity_ok := proto.deserialize_vector3(bit_reader)
 	if !velocity_ok {
-
+		log.error("failed to deserialize velocity of Test_Packet_C")
 		return Test_Packet_C{}, false
 	}
 
@@ -301,6 +327,9 @@ main :: proc() {
 
 		proto.process_send_stream(&send_stream)
 
+		// CONTINUE HERE: When packets are dropped / out of sync, this will return
+		// false and we break out and trying to process empty buffer. Also probably
+		// lots of other things that are broken and buggy
 		for proto.recv_packet(&recv_stream) {}
 
 		packet_data, packet_data_ok := proto.process_recv_stream(&recv_stream, context.allocator)
@@ -321,12 +350,15 @@ main :: proc() {
 		switch test_packet_type_des {
 		case .A:
 			des_test_packet, des_test_packet_ok = deserialize_test_packet_a(&test_packet_reader)
-			assert(des_test_packet_ok)
+			if !des_test_packet_ok do log.error("failed to deserialize test packet a")
+			assert(des_test_packet_ok, "failed to deserialize test packet a")
 		case .B:
 			des_test_packet, des_test_packet_ok = deserialize_test_packet_b(&test_packet_reader)
-			assert(des_test_packet_ok)
+			if !des_test_packet_ok do log.error("failed to deserialize test packet b")
+			assert(des_test_packet_ok, "failed to deserialize test packet b")
 		case .C:
 			des_test_packet, des_test_packet_ok = deserialize_test_packet_c(&test_packet_reader)
+			if !des_test_packet_ok do log.error("failed to deserialize test packet b")
 			assert(des_test_packet_ok)
 		}
 

@@ -143,6 +143,12 @@ create_net_packet :: proc(
 
 // TODO(Thomas): Make sure the sequence number wraps around
 enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, packet_data: []u8) {
+	log.infof(
+		"enqueing packet with qos: %v, type: %d and len(packet_data): %d",
+		qos,
+		packet_type,
+		len(packet_data),
+	)
 	assert(len(packet_data) > 0)
 	if len(packet_data) <= 0 {
 		log.error("len(packet_data) <= 0")
@@ -298,6 +304,8 @@ recv_packet :: proc(recv_stream: ^Recv_Stream) -> bool {
 		recv_stream.net_packet_buf[:],
 	)
 
+	log.infof("recv packet --- bytes_read: %d, remote_endpoint: %v", bytes_read, remote_endpoint)
+
 	if (recv_err != nil && recv_err != net.UDP_Recv_Error.Would_Block) {
 		log.error("recv error: ", recv_err)
 		return false
@@ -307,6 +315,7 @@ recv_packet :: proc(recv_stream: ^Recv_Stream) -> bool {
 	if bytes_read == 0 {
 		return false
 	}
+
 
 	ok := process_packet(recv_stream.net_packet_buf[:bytes_read], recv_stream)
 	assert(ok)
@@ -319,6 +328,7 @@ recv_packet :: proc(recv_stream: ^Recv_Stream) -> bool {
 }
 
 process_packet :: proc(packet_data: []u8, recv_stream: ^Recv_Stream) -> bool {
+	log.info("processing packet_data, len(packet_data): ", len(packet_data))
 	assert(len(packet_data) > 0)
 	if len(packet_data) <= 0 {
 		log.error("len(packet_data) <= 0")

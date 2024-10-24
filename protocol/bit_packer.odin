@@ -393,7 +393,13 @@ read_bits :: proc(reader: ^Bit_Reader, bits: u32) -> (u32, bool) {
 	}
 
 	if reader.bits_read + bits > reader.num_bits {
-		log.error("reader.bits_read + bits > reader.num_bits")
+		log.errorf(
+			`Trying to read more bits than fits in reader.num_bits: reader.bits_read + bits > reader.num_bits --- 
+            reader.bits_read: %d, bits: %d,  reader.num_bits: %d`,
+			reader.bits_read,
+			bits,
+			reader.num_bits,
+		)
 		return 0, false
 	}
 
