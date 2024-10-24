@@ -2,6 +2,7 @@ package protocol
 
 import "base:runtime"
 import "core:fmt"
+import "core:log"
 import "core:mem"
 import "core:testing"
 
@@ -115,26 +116,31 @@ deserialize_packet_header :: proc(bit_reader: ^Bit_Reader) -> (Packet_Header, bo
 
 	crc32, crc32_ok := deserialize_u32(bit_reader)
 	if !crc32_ok {
+		log.error("failed to deserialize crc32")
 		return Packet_Header{}, false
 	}
 
 	qos, qos_ok := read_bits(bit_reader, len(QOS) - 1)
 	if !qos_ok {
+		log.error("failed to deserialize qos")
 		return Packet_Header{}, false
 	}
 
 	packet_type, packet_type_ok := deserialize_u32(bit_reader)
 	if !packet_type_ok {
+		log.error("failed to deserialize packet_type")
 		return Packet_Header{}, false
 	}
 
 	data_length, data_length_ok := deserialize_u32(bit_reader)
 	if !data_length_ok {
+		log.error("failed to deserialize data_length")
 		return Packet_Header{}, false
 	}
 
 	sequence, seq_ok := deserialize_u16(bit_reader)
 	if !seq_ok {
+		log.error("failed to deserialize sequence")
 		return Packet_Header{}, false
 	}
 
@@ -160,17 +166,24 @@ deserialize_packet :: proc(
 	packet_header, packet_header_ok := deserialize_packet_header(bit_reader)
 
 	if !packet_header_ok {
+		log.error("failed to deserialize packet header")
 		return Packet{}, false
 	}
 
 	if !read_align(bit_reader) {
+		log.error("failed to read_align")
 		return Packet{}, false
 	}
 
-	data := make([]u8, packet_header.data_length, allocator)
+	data, alloc_err := make([]u8, packet_header.data_length, allocator)
+	assert(alloc_err == .None)
+	if alloc_err != .None {
+		log.error("alloc error: ", alloc_err)
+	}
 
 	data_ok := read_bytes(bit_reader, data, u32(len(data)))
 	if !data_ok {
+		log.error("failed to read bytes, len(data): ", len(data))
 		return Packet{}, false
 	}
 
@@ -182,16 +195,19 @@ deserialize_fragment_header :: proc(bit_reader: ^Bit_Reader) -> (Fragment_Header
 
 	fragment_size, fragment_size_ok := deserialize_u32(bit_reader)
 	if !fragment_size_ok {
+		log.error("failed to deserialize fragment_size")
 		return Fragment_Header{}, false
 	}
 
 	fragment_id, fragment_id_ok := deserialize_u8(bit_reader)
 	if !fragment_id_ok {
+		log.error("failed to deserialize fragment_id")
 		return Fragment_Header{}, false
 	}
 
 	num_fragments, num_fragments_ok := deserialize_u8(bit_reader)
 	if !num_fragments_ok {
+		log.error("failed to deserialize num_fragments")
 		return Fragment_Header{}, false
 	}
 
@@ -214,16 +230,24 @@ deserialize_fragment :: proc(
 
 	fragment_header, fragment_header_ok := deserialize_fragment_header(bit_reader)
 	if !fragment_header_ok {
+		log.error("failed to deserialize fragment_header")
 		return Fragment{}, false
 	}
 
 	if !deserialize_align(bit_reader) {
+		log.error("failed to deserialize_align")
 		return Fragment{}, false
 	}
 
-	data := make([]u8, fragment_header.fragment_size, allocator)
+	data, alloc_err := make([]u8, fragment_header.fragment_size, allocator)
+	assert(alloc_err == .None)
+	if alloc_err != .None {
+		log.error("alloc error: ", alloc_err)
+	}
+
 	data_ok := read_bytes(bit_reader, data, u32(len(data)))
 	if !data_ok {
+		log.error("failed to read_bytes, len(data): ", len(data))
 		return Fragment{}, false
 	}
 
@@ -243,19 +267,34 @@ split_packet_into_fragments :: proc(
 ) -> []Fragment {
 	packet_size := len(packet_data)
 	assert(packet_size > 0)
+	if packet_size <= 0 {
+		log.error("packet_size <= 0")
+	}
+
 	assert(packet_size <= MAX_PACKET_SIZE)
+	if packet_size > MAX_PACKET_SIZE {
+		log.error("packet_size > MAX_PACKET_SIZE ")
+	}
 
 	fragment_size := min(packet_size, MAX_FRAGMENT_SIZE)
 	num_fragments := (packet_size + MAX_FRAGMENT_SIZE - 1) / MAX_FRAGMENT_SIZE
 
-	fragments := make([]Fragment, num_fragments, allocator)
+	fragments, alloc_err := make([]Fragment, num_fragments, allocator)
+	assert(alloc_err == .None)
+	if alloc_err != .None {
+		log.error("alloc error: ", alloc_err)
+	}
 
 	for &fragment, i in fragments {
 		start := i * MAX_FRAGMENT_SIZE
 		end := min(start + MAX_FRAGMENT_SIZE, packet_size)
 		current_fragment_size := end - start
 
-		fragment.data = make([]u8, current_fragment_size, allocator)
+		fragment.data, alloc_err = make([]u8, current_fragment_size, allocator)
+		assert(alloc_err == .None)
+		if alloc_err != .None {
+			log.error("alloc error: ", alloc_err)
+		}
 		mem.copy(&fragment.data[0], &packet_data[start], current_fragment_size)
 
 		fragment.header = Fragment_Header {

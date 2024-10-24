@@ -70,9 +70,14 @@ write_bits :: proc(writer: ^Bit_Writer, value: u32, bits: u32) -> bool {
 		return false
 	}
 
-	// Check if writing these bits would exceed max_bits
+	// Check if writing these bits would exceed num_bits
 	if (writer.word_index * 32 + writer.scratch_bits + bits) > writer.num_bits {
-		log.error("(writer.word_index * 32 + writer.scratch_bits + bits) > writer.num_bits")
+		log.errorf(
+			`Writing these bits would exceed num_bits: (writer.word_index * 32 + writer.scratch_bits + bits) > writer.num_bits --- 
+            bits: %d, writer.num_bits: %d`,
+			bits,
+			writer.num_bits,
+		)
 		return false
 	}
 
@@ -457,7 +462,12 @@ read_bytes :: proc(reader: ^Bit_Reader, data: []u8, bytes: u32) -> bool {
 
 	assert(reader.bits_read + bytes * 8 <= reader.num_bits)
 	if reader.bits_read + bytes * 8 > reader.num_bits {
-		log.error("reader.bits_read + bytes * 8 > reader.num_bits")
+		log.errorf(
+			`Reading these bytes would exceed the total bits in reader.num_bits: reader.bits_read + bytes * 8 > reader.num_bits --- 
+            bytes: %d, reader.num_bits: %d`,
+			bytes,
+			reader.num_bits,
+		)
 		return false
 	}
 
