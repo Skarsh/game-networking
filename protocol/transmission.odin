@@ -44,15 +44,25 @@ create_send_stream :: proc(
 	endpoint_port: int,
 ) -> Send_Stream {
 	packet_queue := queue.Queue([]u8){}
-	queue.init(&packet_queue, MAX_OUTGOING_PACKETS, allocator)
+	alloc_err := queue.init(&packet_queue, MAX_OUTGOING_PACKETS, allocator)
+	assert(alloc_err == .None)
+	if alloc_err != .None {
+		log.error("alloc error when init queue: ", alloc_err)
+	}
 
 	socket, socket_ok := create_udp_socket(address, port)
 	assert(socket_ok)
+	if !socket_ok {
+		log.error("failed to create udp socket")
+	}
 
 	endpoint_string := fmt.tprintf("%s:%d", endpoint_address, endpoint_port)
 
 	endpoint, endpoint_ok := net.parse_endpoint(endpoint_string)
 	assert(endpoint_ok)
+	if !endpoint_ok {
+		log.error("failed to parse endpoint")
+	}
 
 	return Send_Stream {
 		allocator = allocator,
@@ -64,7 +74,16 @@ create_send_stream :: proc(
 }
 
 free_send_stream :: proc(send_stream: ^Send_Stream) {
-	free_all(send_stream.allocator)
+	err := free_all(send_stream.allocator)
+	assert(err == nil)
+	if err != nil {
+		log.error("failed to free_all")
+	}
+
+	// NOTE(Thomas): Initing the queue here again is necessary for the queue to be valid.
+	// TODO(Thomas): Is there a better way to do this? 
+	alloc_err := queue.init(&send_stream.queue, MAX_OUTGOING_PACKETS, send_stream.allocator)
+	assert(alloc_err == .None)
 }
 
 destroy_send_stream :: proc(send_stream: ^Send_Stream) {
@@ -82,7 +101,15 @@ create_net_packet :: proc(
 ) -> []u8 {
 	data_size: u32 = u32(len(data))
 	assert(data_size > 0)
+	if data_size <= 0 {
+		log.error("data_size <= 0")
+	}
+
 	assert(data_size <= MTU)
+	if data_size > MTU {
+		log.error("data_size > MTU")
+	}
+
 	packet_header := Packet_Header {
 		crc32       = 42,
 		qos         = u32(qos),
@@ -101,9 +128,15 @@ create_net_packet :: proc(
 		data,
 	)
 	assert(serialize_packet_ok)
+	if !serialize_packet_ok {
+		log.error("failed to serialize packet form header and byte slice")
+	}
 
 	flush_ok := flush_bits(&packet_writer)
 	assert(flush_ok)
+	if !flush_ok {
+		log.error("failed to flush")
+	}
 
 	return convert_word_slice_to_byte_slice(packet_writer.buffer)
 }
@@ -111,7 +144,14 @@ create_net_packet :: proc(
 // TODO(Thomas): Make sure the sequence number wraps around
 enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, packet_data: []u8) {
 	assert(len(packet_data) > 0)
+	if len(packet_data) <= 0 {
+		log.error("len(packet_data) <= 0")
+	}
+
 	assert(len(packet_data) <= MAX_PACKET_SIZE)
+	if len(packet_data) > MAX_PACKET_SIZE {
+		log.error("len(pacet_data) > MAX_PACKET_SIZE")
+	}
 
 	switch qos {
 	case .Best_Effort:
@@ -127,9 +167,15 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 			fragment_writer := create_writer(fragment_buffer)
 			serialize_fragment_ok := serialize_fragment(&fragment_writer, fragment)
 			assert(serialize_fragment_ok)
+			if !serialize_fragment_ok {
+				log.error("failed to serialize fragment")
+			}
 
 			flush_ok := flush_bits(&fragment_writer)
 			assert(flush_ok)
+			if !flush_ok {
+				log.error("failed to flush")
+			}
 
 			packet_bytes := create_net_packet(
 				send_stream.allocator,
@@ -142,7 +188,13 @@ enqueue_packet :: proc(send_stream: ^Send_Stream, qos: QOS, packet_type: u32, pa
 			log.info("len of packet_bytes pushed onto queue: ", len(packet_bytes))
 			push_ok, push_err := queue.push_back(&send_stream.queue, packet_bytes)
 			assert(push_ok)
+			if !push_ok {
+				log.error("failed to push onto queue: len(packet_bytes)", len(packet_bytes))
+			}
 			assert(push_err == nil)
+			if push_err != nil {
+				log.error("error when pushing onto queue: ", push_err)
+			}
 		}
 
 	case .Reliable:
@@ -159,10 +211,10 @@ process_send_stream :: proc(send_stream: ^Send_Stream) {
 		log.info("len(packet_bytes): ", len(packet_bytes))
 		bytes_written, err := net.send_udp(send_stream.socket, packet_bytes, send_stream.endpoint)
 
+		assert(err == nil)
 		if err != nil {
 			log.error("Error when calling 'net.send_udp': ", err)
 		}
-		assert(err == nil)
 	}
 
 	free_send_stream(send_stream)
@@ -214,10 +266,16 @@ create_recv_stream :: proc(
 
 	socket, socket_ok := create_udp_socket(address, port)
 	assert(socket_ok)
+	if !socket_ok {
+		log.error("failed to create udp_socket")
+	}
 
 	// make the socket non-blocking
 	blocking_err := net.set_blocking(socket, false)
 	assert(blocking_err == nil)
+	if blocking_err != nil {
+		log.error("udp socket set blocking error: ", blocking_err)
+	}
 
 	return Recv_Stream {
 		persistent_allocator = persistent_allocator,
@@ -240,7 +298,8 @@ recv_packet :: proc(recv_stream: ^Recv_Stream) -> bool {
 		recv_stream.net_packet_buf[:],
 	)
 
-	if (recv_err != nil) {
+	if (recv_err != nil && recv_err != net.UDP_Recv_Error.Would_Block) {
+		log.error("recv error: ", recv_err)
 		return false
 	}
 
@@ -252,6 +311,7 @@ recv_packet :: proc(recv_stream: ^Recv_Stream) -> bool {
 	ok := process_packet(recv_stream.net_packet_buf[:bytes_read], recv_stream)
 	assert(ok)
 	if (!ok) {
+		log.error("failed to process packet")
 		return false
 	}
 
@@ -260,21 +320,36 @@ recv_packet :: proc(recv_stream: ^Recv_Stream) -> bool {
 
 process_packet :: proc(packet_data: []u8, recv_stream: ^Recv_Stream) -> bool {
 	assert(len(packet_data) > 0)
+	if len(packet_data) <= 0 {
+		log.error("len(packet_data) <= 0")
+	}
+
 	assert(len(packet_data) <= MTU)
+	if len(packet_data) > MTU {
+		log.error("len(packet_data) > MTU")
+	}
 
 	packet_reader := create_reader(convert_byte_slice_to_word_slice(packet_data))
 
 	packet, packet_ok := deserialize_packet(&packet_reader, recv_stream.temp_allocator)
+	assert(packet_ok)
+	if !packet_ok {
+		log.error("failed to deserialize packet")
+		return false
+	}
+
 	assert(packet.header.data_length > 0)
+	if packet.header.data_length <= 0 {
+		log.error("packet.header.data_length <= 0")
+	}
 
 	// TODO(Thomas): MTU or MAX_FRAGMENT_SIZE here?
 	assert(packet.header.data_length <= MTU)
+	if packet.header.data_length > MTU {
+		log.error("packet.header.data_length > MTU")
+	}
 
 	defer recv_stream_free_temp_allocator(recv_stream)
-	assert(packet_ok)
-	if !packet_ok {
-		return false
-	}
 
 	qos := QOS(packet.header.qos)
 
@@ -288,6 +363,7 @@ process_packet :: proc(packet_data: []u8, recv_stream: ^Recv_Stream) -> bool {
 		)
 		assert(fragment_ok)
 		if !fragment_ok {
+			log.error("failed to process fragment")
 			return false
 		}
 	case .Reliable:
@@ -473,6 +549,9 @@ process_recv_stream :: proc(
 		allocator,
 	)
 	assert(packet_data_ok)
+	if !packet_data_ok {
+		log.error("failed to assemble_fragments")
+	}
 
 	return packet_data, true
 }
@@ -501,7 +580,12 @@ assemble_fragments :: proc(
 	log.info("total_size: ", total_size)
 
 	// Allocate and copy data
-	data := make([]u8, total_size, allocator)
+	data, alloc_err := make([]u8, total_size, allocator)
+	assert(alloc_err == .None)
+	if alloc_err != .None {
+		log.error("alloc error: ", alloc_err)
+	}
+
 	packet_data := Packet_Data {
 		type = packet_type,
 		data = data,

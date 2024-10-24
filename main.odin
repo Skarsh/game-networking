@@ -6,6 +6,7 @@ import "core:log"
 import "core:math"
 import "core:math/rand"
 import "core:mem"
+import "core:mem/virtual"
 import "core:testing"
 
 import proto "protocol"
@@ -227,18 +228,32 @@ main :: proc() {
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
-	// TODO(Thomas): Make own allocators here.
+	recv_arena := virtual.Arena{}
+	recv_arena_buffer := make([]u8, 100 * 1024)
+	recv_arena_alloc_err := virtual.arena_init_buffer(&recv_arena, recv_arena_buffer)
+	assert(recv_arena_alloc_err == .None)
+	recv_arena_allocator := virtual.arena_allocator(&recv_arena)
+	defer delete(recv_arena_buffer)
+
+	// TODO(Thomas): Pass in the Arena instead
 	recv_stream := proto.create_recv_stream(
 		context.allocator,
-		context.temp_allocator,
+		recv_arena_allocator,
 		"127.0.0.1",
 		8001,
 	)
 	defer proto.destroy_recv_stream(&recv_stream)
 
-	// TODO(Thomas): Make own allocator here, Arena based probably
+	send_arena := virtual.Arena{}
+	send_arena_buffer := make([]u8, 100 * 1024)
+	send_arena_alloc_err := virtual.arena_init_buffer(&send_arena, send_arena_buffer)
+	assert(send_arena_alloc_err == .None)
+	send_arena_allocator := virtual.arena_allocator(&send_arena)
+	defer delete(send_arena_buffer)
+
+	// TODO(Thomas): Pass in the Arena instead
 	send_stream := proto.create_send_stream(
-		context.temp_allocator,
+		send_arena_allocator,
 		"127.0.0.1",
 		8000,
 		"127.0.0.1",
@@ -276,7 +291,6 @@ main :: proc() {
 		assert(serialize_test_packet_ok)
 
 		flush_bits_ok := proto.flush_bits(&test_packet_writer)
-
 
 		proto.enqueue_packet(
 			&send_stream,
