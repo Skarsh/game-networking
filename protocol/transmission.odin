@@ -547,6 +547,9 @@ process_fragment :: proc(
 	return true
 }
 
+// TODO(Thomas): This needs to assemble the fragments for packets that are done.
+// Now it only does it for the current sequence, which only is kinda correct if there's
+// never a dropped or out-of-order packet, which obviously won't work for us.
 process_recv_stream :: proc(
 	recv_stream: ^Recv_Stream,
 	allocator: runtime.Allocator,
@@ -554,10 +557,16 @@ process_recv_stream :: proc(
 	Packet_Data,
 	bool,
 ) {
-	packet_data, packet_data_ok := assemble_fragments(
-		recv_stream.realtime_packet_buffer,
-		allocator,
-	)
+	realtime_packet_buffer := recv_stream.realtime_packet_buffer
+	sequence := realtime_packet_buffer.current_sequence
+
+	index := get_sequence_index(u16(sequence))
+
+	packet_type := realtime_packet_buffer.entries[index].packet_type
+	fragment_entry := &realtime_packet_buffer.entries[index].entry
+
+	packet_data, packet_data_ok := assemble_fragments(packet_type, fragment_entry, allocator)
+
 	assert(packet_data_ok)
 	if !packet_data_ok {
 		log.error("failed to assemble_fragments")
@@ -567,27 +576,20 @@ process_recv_stream :: proc(
 }
 
 assemble_fragments :: proc(
-	realtime_packet_buffer: ^Realtime_Packet_Buffer,
+	packet_type: u32,
+	fragment_entry: ^Fragment_Entry,
 	allocator: runtime.Allocator,
 ) -> (
 	Packet_Data,
 	bool,
 ) {
-	log.info("current_sequence: ", realtime_packet_buffer.current_sequence)
-	index := get_sequence_index(u16(realtime_packet_buffer.current_sequence))
-	log.info("index: ", index)
-
-	packet_type := realtime_packet_buffer.entries[index].packet_type
-	entry := &realtime_packet_buffer.entries[index].entry
-	num_fragments: u32 = u32(entry.num_fragments)
+	num_fragments: u32 = u32(fragment_entry.num_fragments)
 	total_size := 0
 
 	// Calculate total size
-	for fragment in entry.fragments[:num_fragments] {
+	for fragment in fragment_entry.fragments[:num_fragments] {
 		total_size += fragment.data_length
 	}
-
-	log.info("total_size: ", total_size)
 
 	// Allocate and copy data
 	data, alloc_err := make([]u8, total_size, allocator)
@@ -601,14 +603,12 @@ assemble_fragments :: proc(
 		data = data,
 	}
 	offset := 0
-	for &fragment in entry.fragments[:num_fragments] {
+	for &fragment in fragment_entry.fragments[:num_fragments] {
 		log.info("fragment.data_length: ", fragment.data_length)
 		mem.copy(&packet_data.data[offset], &fragment.data[0], fragment.data_length)
 		offset += fragment.data_length
 	}
 
-	log.info("packet_type: ", packet_type)
-	log.info("len(packet_data): ", len(packet_data.data))
 	return packet_data, true
 }
 
