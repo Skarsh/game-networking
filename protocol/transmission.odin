@@ -604,7 +604,8 @@ assemble_fragments :: proc(
 	}
 	offset := 0
 	for &fragment in fragment_entry.fragments[:num_fragments] {
-		log.info("fragment.data_length: ", fragment.data_length)
+		assert(fragment.data_length > 0)
+		assert(fragment.data_length <= MAX_FRAGMENT_SIZE)
 		mem.copy(&packet_data.data[offset], &fragment.data[0], fragment.data_length)
 		offset += fragment.data_length
 	}
@@ -627,6 +628,7 @@ create_udp_socket :: proc(address: string, port: int) -> (net.UDP_Socket, bool) 
 
 // ------------- Tests -------------
 
+// TODO(Thomas): Add more test cases
 @(test)
 test_enqueue_packet :: proc(t: ^testing.T) {
 	allocator := context.allocator
@@ -638,4 +640,53 @@ test_enqueue_packet :: proc(t: ^testing.T) {
 
 	testing.expect(t, send_stream.current_sequence == 1, "Sequence should be incremented")
 	testing.expect(t, len(send_stream.queue.data) > 0, "Queue should not be empty")
+}
+
+// TODO(Thomas): Add more tests cases
+@(test)
+test_assemble_fragments :: proc(t: ^testing.T) {
+	// Test case 1: Basic assembly with two fragments
+	{
+		packet_type: u32 = 2
+		fragment1_data := [MAX_FRAGMENT_SIZE]u8{}
+		fragment1_data[0] = 1
+		fragment1_data[1] = 2
+		fragment1_data[2] = 3
+
+		fragment2_data := [MAX_FRAGMENT_SIZE]u8{}
+		fragment2_data[0] = 4
+		fragment2_data[1] = 5
+		fragment2_data[2] = 6
+
+		fragment_entry := new(Fragment_Entry)
+		defer free(fragment_entry)
+		fragment_entry.num_fragments = 2
+		fragment_entry.received_fragments = 2
+
+		fragment_entry.fragments[0] = Fragment_Data {
+			data_length = 3,
+			data        = fragment1_data,
+		}
+
+		fragment_entry.fragments[1] = Fragment_Data {
+			data_length = 3,
+			data        = fragment2_data,
+		}
+
+		assembled_packet_data, assembled_packet_data_ok := assemble_fragments(
+			packet_type,
+			fragment_entry,
+			context.allocator,
+		)
+		defer delete(assembled_packet_data.data)
+
+		testing.expectf(t, assembled_packet_data_ok, "assembling fragments hould succeed")
+		testing.expect_value(t, assembled_packet_data.type, packet_type)
+		testing.expect_value(t, assembled_packet_data.data[0], 1)
+		testing.expect_value(t, assembled_packet_data.data[1], 2)
+		testing.expect_value(t, assembled_packet_data.data[2], 3)
+		testing.expect_value(t, assembled_packet_data.data[3], 4)
+		testing.expect_value(t, assembled_packet_data.data[4], 5)
+		testing.expect_value(t, assembled_packet_data.data[5], 6)
+	}
 }
