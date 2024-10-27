@@ -306,9 +306,23 @@ recv_packet :: proc(recv_stream: ^Recv_Stream) -> bool {
 
 	log.infof("recv packet --- bytes_read: %d, remote_endpoint: %v", bytes_read, remote_endpoint)
 
-	if (recv_err != nil && recv_err != net.UDP_Recv_Error.Would_Block) {
-		log.error("recv error: ", recv_err)
-		return false
+	// TODO(Thomas): I'd prefer to somehow not have to do the check for OS like this.
+	when ODIN_OS == .Windows {
+		if recv_err != nil && recv_err != net.UDP_Recv_Error.Would_Block {
+			log.error("recv error: ", recv_err)
+			return false
+		}
+	} else when ODIN_OS == .Linux {
+		if recv_err != nil && recv_err != net.UDP_Recv_Error.Timeout {
+			log.error("recv error: ", recv_err)
+			return false
+		}
+	} else {
+		// Handle other operating systems or provide a default behavior
+		if recv_err != nil {
+			log.error("recv error: ", recv_err)
+			return false
+		}
 	}
 
 	// TODO(Thomas): Return false or some error type here?
