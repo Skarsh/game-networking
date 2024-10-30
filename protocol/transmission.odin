@@ -671,7 +671,6 @@ test_enqueue_packet :: proc(t: ^testing.T) {
 	testing.expect(t, len(send_stream.queue.data) > 0, "Queue should not be empty")
 }
 
-// TODO(Thomas): Add more tests cases
 @(test)
 test_assemble_fragments :: proc(t: ^testing.T) {
 	logger := Test_Redirect_Logger{}
