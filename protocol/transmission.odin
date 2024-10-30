@@ -526,10 +526,7 @@ process_fragment :: proc(
 		entry^ = Realtime_Packet_Entry {
 			packet_type = packet_type,
 			sequence = u32(packet_sequence),
-			entry = Fragment_Entry {
-				num_fragments = u32(fragment.header.num_fragments),
-				received_fragments = 1,
-			},
+			entry = Fragment_Entry{num_fragments = u32(fragment.header.num_fragments)},
 		}
 	}
 
@@ -581,11 +578,14 @@ process_recv_stream :: proc(
 	packet_type := realtime_packet_buffer.entries[index].packet_type
 	fragment_entry := &realtime_packet_buffer.entries[index].entry
 
+	// Here we need to check which packets have received all the fragments, and only then try to 
+	// assemble the fragments into the complete packet
+
 	packet_data, packet_data_ok := assemble_fragments(packet_type, fragment_entry, allocator)
 
-	assert(packet_data_ok)
 	if !packet_data_ok {
 		log.error("failed to assemble_fragments")
+		return packet_data, packet_data_ok
 	}
 
 	return packet_data, true
@@ -602,6 +602,15 @@ assemble_fragments :: proc(
 	Packet_Data,
 	bool,
 ) {
+	if fragment_entry.num_fragments != fragment_entry.received_fragments {
+		log.errorf(
+			"fragment entry's num_fragments is != to received_fragments, %d, %d",
+			fragment_entry.num_fragments,
+			fragment_entry.received_fragments,
+		)
+		return Packet_Data{}, false
+	}
+
 	num_fragments: u32 = u32(fragment_entry.num_fragments)
 	total_size := 0
 
