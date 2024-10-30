@@ -232,8 +232,8 @@ Fragment_Data :: struct {
 }
 
 Fragment_Entry :: struct {
-	num_fragments:      u8,
-	received_fragments: u8,
+	num_fragments:      u32,
+	received_fragments: u32,
 	fragments:          [MAX_FRAGMENTS_PER_PACKET]Fragment_Data,
 }
 
@@ -527,7 +527,7 @@ process_fragment :: proc(
 			packet_type = packet_type,
 			sequence = u32(packet_sequence),
 			entry = Fragment_Entry {
-				num_fragments = fragment.header.num_fragments,
+				num_fragments = u32(fragment.header.num_fragments),
 				received_fragments = 1,
 			},
 		}
@@ -564,6 +564,8 @@ process_fragment :: proc(
 // TODO(Thomas): This needs to assemble the fragments for packets that are done.
 // Now it only does it for the current sequence, which only is kinda correct if there's
 // never a dropped or out-of-order packet, which obviously won't work for us.
+// This procedure takes in an allocator, which it uses to allocate the total size
+// needed for the packet data. It is the calller's responsibility to free this memory. This is also
 process_recv_stream :: proc(
 	recv_stream: ^Recv_Stream,
 	allocator: runtime.Allocator,
@@ -589,6 +591,9 @@ process_recv_stream :: proc(
 	return packet_data, true
 }
 
+// This procedure takes in an allocator, which it uses to allocate the total size
+// needed for the packet data. It is the calller's responsibility to free this memory. This is also
+// why the structure allocated with the data is returned even if it the fails data length checks
 assemble_fragments :: proc(
 	packet_type: u32,
 	fragment_entry: ^Fragment_Entry,
@@ -616,10 +621,20 @@ assemble_fragments :: proc(
 		type = packet_type,
 		data = data,
 	}
+
 	offset := 0
+
 	for &fragment in fragment_entry.fragments[:num_fragments] {
-		assert(fragment.data_length > 0)
-		assert(fragment.data_length <= MAX_FRAGMENT_SIZE)
+		if fragment.data_length <= 0 {
+			log.error("fragment data length is <= 0, ", fragment.data_length)
+			return packet_data, false
+		}
+
+		if fragment.data_length > MAX_FRAGMENT_SIZE {
+			log.error("fragment data length is >= MAX_FRAGMENT_SIZE, ", fragment.data_length)
+			return packet_data, false
+		}
+
 		mem.copy(&packet_data.data[offset], &fragment.data[0], fragment.data_length)
 		offset += fragment.data_length
 	}
@@ -659,6 +674,15 @@ test_enqueue_packet :: proc(t: ^testing.T) {
 // TODO(Thomas): Add more tests cases
 @(test)
 test_assemble_fragments :: proc(t: ^testing.T) {
+	logger := Test_Redirect_Logger{}
+	defer destroy_test_redirect_logger(&logger)
+	prev_logger := context.logger
+	context.logger = log.Logger {
+		data      = &logger,
+		procedure = test_redirect_log_handler,
+	}
+	defer context.logger = prev_logger
+
 	// Test case 1: Basic assembly with two fragments
 	{
 		packet_type: u32 = 2
@@ -694,7 +718,7 @@ test_assemble_fragments :: proc(t: ^testing.T) {
 		)
 		defer delete(assembled_packet_data.data)
 
-		testing.expectf(t, assembled_packet_data_ok, "assembling fragments hould succeed")
+		testing.expectf(t, assembled_packet_data_ok, "assembling fragments should succeed")
 		testing.expect_value(t, assembled_packet_data.type, packet_type)
 		testing.expect_value(t, assembled_packet_data.data[0], 1)
 		testing.expect_value(t, assembled_packet_data.data[1], 2)
@@ -702,5 +726,71 @@ test_assemble_fragments :: proc(t: ^testing.T) {
 		testing.expect_value(t, assembled_packet_data.data[3], 4)
 		testing.expect_value(t, assembled_packet_data.data[4], 5)
 		testing.expect_value(t, assembled_packet_data.data[5], 6)
+	}
+
+	// Test case 2: Max number of fragments
+	{
+		packet_type: u32 = 2
+		fragment_entry := new(Fragment_Entry)
+		defer free(fragment_entry)
+		for i in 0 ..< MAX_FRAGMENTS_PER_PACKET {
+			fragment_data := [MAX_FRAGMENT_SIZE]u8{}
+			for &b in fragment_data {
+				b = u8(i % 255)
+			}
+			fragment_entry.fragments[i] = Fragment_Data {
+				data_length = len(fragment_data),
+				data        = fragment_data,
+			}
+		}
+		fragment_entry.num_fragments = MAX_FRAGMENTS_PER_PACKET
+		fragment_entry.received_fragments = MAX_FRAGMENTS_PER_PACKET
+
+		assembled_packet_data, assembled_packet_data_ok := assemble_fragments(
+			packet_type,
+			fragment_entry,
+			context.allocator,
+		)
+		defer delete(assembled_packet_data.data)
+		testing.expectf(t, assembled_packet_data_ok, "assembling fragments should succeed")
+		testing.expect_value(t, assembled_packet_data.type, packet_type)
+
+		for i in 0 ..< MAX_FRAGMENTS_PER_PACKET {
+			fragment_data := assembled_packet_data.data[i *
+			MAX_FRAGMENT_SIZE:(i + 1) *
+			MAX_FRAGMENT_SIZE]
+
+			for b in fragment_data {
+				testing.expect_value(t, b, u8(i % 255))
+			}
+		}
+	}
+
+	// Test case 3: Missing fragment, should return false
+	{
+		packet_type: u32 = 2
+		fragment_data := [MAX_FRAGMENT_SIZE]u8{}
+		fragment_data[0] = 1
+		fragment_data[1] = 2
+		fragment_data[2] = 3
+
+		fragment_entry := new(Fragment_Entry, context.allocator)
+		defer free(fragment_entry)
+		fragment_entry.num_fragments = 2
+		fragment_entry.received_fragments = 1
+
+		fragment_entry.fragments[0] = Fragment_Data {
+			data_length = 3,
+			data        = fragment_data,
+		}
+
+		assembled_packet_data, assembled_packet_data_ok := assemble_fragments(
+			packet_type,
+			fragment_entry,
+			context.allocator,
+		)
+		defer delete(assembled_packet_data.data)
+
+		testing.expectf(t, !assembled_packet_data_ok, "assembling fragments hould succeed")
 	}
 }
