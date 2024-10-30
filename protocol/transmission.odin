@@ -579,7 +579,14 @@ process_recv_stream :: proc(
 	fragment_entry := &realtime_packet_buffer.entries[index].entry
 
 	// Here we need to check which packets have received all the fragments, and only then try to 
-	// assemble the fragments into the complete packet
+	// assemble the fragments into the complete packet. There is a question about which packet to 
+	// assemble though, should it be the first in the buffer that is complete? How to mark it when
+	// it's been assembled? Probably need a boolean or something on the Fragment_Entry whether its
+	// complete or not.
+	//
+	// If this is being called once for every network packet being processed, no more than one packet 
+	// should be able to be completed at the time. This is probably a too strict requirement, but its 
+	// fine to begin with.
 
 	packet_data, packet_data_ok := assemble_fragments(packet_type, fragment_entry, allocator)
 
