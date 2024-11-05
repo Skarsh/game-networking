@@ -333,7 +333,10 @@ main :: proc() {
 		// lots of other things that are broken and buggy
 		for proto.recv_packet(&recv_stream) {}
 
-		packet_data, packet_data_ok := proto.process_recv_stream(&recv_stream, context.allocator)
+		packet_data, packet_data_ok := proto.process_realtime_packet_buffer(
+			recv_stream.realtime_packet_buffer,
+			context.allocator,
+		)
 
 		assert(packet_data_ok)
 		defer delete(packet_data.data, context.allocator)

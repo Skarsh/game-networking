@@ -234,6 +234,8 @@ Fragment_Data :: struct {
 Fragment_Entry :: struct {
 	num_fragments:      u32,
 	received_fragments: u32,
+	// TODO(Thomas): Does this belong in the Realtime_Packet_Entry instead?
+	completed:          bool,
 	fragments:          [MAX_FRAGMENTS_PER_PACKET]Fragment_Data,
 }
 
@@ -526,7 +528,10 @@ process_fragment :: proc(
 		entry^ = Realtime_Packet_Entry {
 			packet_type = packet_type,
 			sequence = u32(packet_sequence),
-			entry = Fragment_Entry{num_fragments = u32(fragment.header.num_fragments)},
+			entry = Fragment_Entry {
+				num_fragments = u32(fragment.header.num_fragments),
+				completed = false,
+			},
 		}
 	}
 
@@ -563,39 +568,37 @@ process_fragment :: proc(
 // never a dropped or out-of-order packet, which obviously won't work for us.
 // This procedure takes in an allocator, which it uses to allocate the total size
 // needed for the packet data. It is the calller's responsibility to free this memory. This is also
-process_recv_stream :: proc(
-	recv_stream: ^Recv_Stream,
+process_realtime_packet_buffer :: proc(
+	realtime_packet_buffer: ^Realtime_Packet_Buffer,
 	allocator: runtime.Allocator,
 ) -> (
 	Packet_Data,
 	bool,
 ) {
-	realtime_packet_buffer := recv_stream.realtime_packet_buffer
-	sequence := realtime_packet_buffer.current_sequence
+	// TODO(Thomas): This will only assemble and return the first packet that has received
+	// all the fragments and has not been completed before. 
+	for idx in 0 ..< len(realtime_packet_buffer.entries) {
+		fragment_entry := &realtime_packet_buffer.entries[idx].entry
+		if fragment_entry.num_fragments == fragment_entry.received_fragments &&
+		   !fragment_entry.completed {
 
-	index := get_sequence_index(u16(sequence))
+			index := get_sequence_index(u16(realtime_packet_buffer.entries[idx].sequence))
 
-	packet_type := realtime_packet_buffer.entries[index].packet_type
-	fragment_entry := &realtime_packet_buffer.entries[index].entry
+			packet_data, packet_data_ok := assemble_fragments(
+				realtime_packet_buffer.entries[idx].packet_type,
+				&realtime_packet_buffer.entries[idx].entry,
+				allocator,
+			)
+			if !packet_data_ok {
+				log.error("Failed to assemble fragments")
+				return Packet_Data{}, false
+			}
 
-	// Here we need to check which packets have received all the fragments, and only then try to 
-	// assemble the fragments into the complete packet. There is a question about which packet to 
-	// assemble though, should it be the first in the buffer that is complete? How to mark it when
-	// it's been assembled? Probably need a boolean or something on the Fragment_Entry whether its
-	// complete or not.
-	//
-	// If this is being called once for every network packet being processed, no more than one packet 
-	// should be able to be completed at the time. This is probably a too strict requirement, but its 
-	// fine to begin with.
-
-	packet_data, packet_data_ok := assemble_fragments(packet_type, fragment_entry, allocator)
-
-	if !packet_data_ok {
-		log.error("failed to assemble_fragments")
-		return packet_data, packet_data_ok
+			return packet_data, true
+		}
 	}
 
-	return packet_data, true
+	return Packet_Data{}, true
 }
 
 // This procedure takes in an allocator, which it uses to allocate the total size
@@ -655,6 +658,8 @@ assemble_fragments :: proc(
 		offset += fragment.data_length
 	}
 
+
+	fragment_entry.completed = true
 	return packet_data, true
 }
 
@@ -806,6 +811,55 @@ test_assemble_fragments :: proc(t: ^testing.T) {
 		)
 		defer delete(assembled_packet_data.data)
 
-		testing.expectf(t, !assembled_packet_data_ok, "assembling fragments hould succeed")
+		testing.expectf(t, !assembled_packet_data_ok, "assembling fragments should succeed")
+		testing.expect_value(t, assembled_packet_data.type, packet_type)
 	}
+}
+
+@(test)
+test_process_realtime_packet_buffer :: proc(t: ^testing.T) {
+
+	// Test case 1: Simple packet with all fragments received are being assembled.
+	{
+		realtime_packet_buffer := new(Realtime_Packet_Buffer, context.allocator)
+		defer free(realtime_packet_buffer)
+
+		packet_type: u32 = 1
+		fragment_data := [MAX_FRAGMENT_SIZE]u8{}
+		fragment_data[0] = 1
+		fragment_data[1] = 2
+		fragment_data[2] = 3
+
+		fragment_entry := new(Fragment_Entry, context.allocator)
+		defer free(fragment_entry)
+
+		fragment_entry.num_fragments = 1
+		fragment_entry.received_fragments = 1
+		fragment_entry.fragments[0] = Fragment_Data {
+			data_length = 3,
+			data        = fragment_data,
+		}
+
+		realtime_packet_buffer.entries[0].entry = fragment_entry^
+
+		packet_data, packet_data_ok := process_realtime_packet_buffer(
+			realtime_packet_buffer,
+			context.allocator,
+		)
+		testing.expectf(t, packet_data_ok, "processing realtime packet buffer should succeed")
+		defer delete(packet_data.data)
+
+		testing.expect_value(t, packet_data.data[0], 1)
+		testing.expect_value(t, packet_data.data[1], 2)
+		testing.expect_value(t, packet_data.data[2], 3)
+	}
+
+	// Test case 2: If fragment is missing, packet is not assembled, should not crash.
+	{
+
+	}
+
+	// Test case 3: If more than one packet has gotten all their fragments received, they should
+	//              all be completed.
+
 }
