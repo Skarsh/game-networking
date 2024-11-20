@@ -341,6 +341,12 @@ main :: proc() {
 		assert(packet_data_ok)
 		defer delete(packet_data.data, context.allocator)
 
+		// TODO(Thomas): Do this here or in the process_realtime_packet_buffer procedure?
+		// If the length of the packet data is 0, we know that it doesn't make sense to deserialize it.
+		// Question is whether this is the right place to do this, or maybe packet_data_ok should be false
+		// in this case, or introduce an error type for it.
+		if len(packet_data.data) == 0 do continue
+
 		test_packet_type_des := Test_Packet_Type(packet_data.type)
 
 		log.info("Recv test packet_type: ", test_packet_type_des)
