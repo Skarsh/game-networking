@@ -498,7 +498,7 @@ process_fragment :: proc(
 	   ) >
 	   1024 {
 		log.errorf(
-			"Packet sequence number is wildly out of range - packet_sequence: %v, packet_buffer.current_sequence: ",
+			"Packet sequence number is wildly out of range - packet_sequence: %d, packet_buffer.current_sequence: %d",
 			packet_sequence,
 			recv_stream.realtime_packet_buffer.current_sequence,
 		)
