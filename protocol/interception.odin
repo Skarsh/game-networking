@@ -27,9 +27,32 @@ Effect :: enum {
 	Duplicate,
 }
 
+Lagged_Packet :: struct {
+	data: []u8,
+	// This is the number of packets that needs to be sent before this is sent.
+	// This makes it easier for now, arguably time is more realistic, but that would
+	// comes with a lot of issues too.
+	lag:  int,
+}
+
+Corrupted_Packet :: struct {
+	original: []u8,
+	mutated:  []u8,
+}
+
+Duplicated_Packet :: struct {
+	data:         []u8,
+	original_seq: u16,
+	duplicated:   u16,
+}
+
 Interception_Socket :: struct {
-	incoming_queue: queue.Queue([]u8),
-	outgoing_queue: queue.Queue([]u8),
+	incoming_queue:     queue.Queue([]u8),
+	dropped_packets:    [dynamic][]u8,
+	lagged_packets:     [dynamic][]Lagged_Packet,
+	corrupted_packets:  [dynamic]Corrupted_Packet,
+	duplicated_packets: [dynamic]Duplicated_Packet,
+	outgoing_queue:     queue.Queue([]u8),
 }
 
 send_interception :: proc(socket: Interception_Socket, buf: []byte) -> int {
@@ -40,6 +63,14 @@ send_interception :: proc(socket: Interception_Socket, buf: []byte) -> int {
 	// For duplicate we need to keep track of which packet / sequence the orignal was.
 	return 14
 }
+
+drop_packet :: proc(socket: ^Interception_Socket) {}
+
+lag_packet :: proc(socket: ^Interception_Socket) {}
+
+corrupt_packet :: proc(socket: ^Interception_Socket) {}
+
+duplicate_packet :: proc(socket: ^Interception_Socket) {}
 
 send_packet :: proc(
 	socket: Socket,
