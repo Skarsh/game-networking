@@ -1,5 +1,8 @@
 package protocol
 
+import queue "core:container/queue"
+import "core:net"
+
 // The idea for the interception "system" is to mimic packet loss, out-of-order packets
 // and other conditions that can happen in real networks specifically for how the 
 // transmission module should deal with it. This will not be a realistic network emulator.
@@ -17,6 +20,47 @@ package protocol
 // properly, so we drop the third fragment. On the receiving side we can now assert that only 9 of the fragments should
 // be received. Now we can do something similar for out-of-order, lag etc.
 
-Interception_Send_Stream :: struct {}
+Effect :: enum {
+	Drop,
+	Lag,
+	Corrupt,
+	Duplicate,
+}
 
-Interception_Recv_Stream :: struct {}
+Interception_Socket :: struct {
+	incoming_queue: queue.Queue([]u8),
+	outgoing_queue: queue.Queue([]u8),
+}
+
+send_interception :: proc(socket: Interception_Socket, buf: []byte) -> int {
+	// Take a incoming packet and apply an effect.
+	// For the drop effect we need to keep track of which packet / sequence that is dropped
+	// For the lag effect, we need to store the packet in another buffer / queue until the lag effect is over
+	// For the corruption we need to keep track of the original contents before corrupting
+	// For duplicate we need to keep track of which packet / sequence the orignal was.
+	return 14
+}
+
+send_packet :: proc(
+	socket: Socket,
+	buf: []byte,
+	endpoint: net.Endpoint,
+) -> (
+	bytes_written: int,
+	err: net.Network_Error,
+) {
+	switch sock in socket {
+	case net.UDP_Socket:
+		return net.send_udp(sock, buf, endpoint)
+	case Interception_Socket:
+		bytes := send_interception(sock, buf)
+		return bytes, nil
+	}
+	return 0, nil
+}
+
+// TODO(Thomas): Find a better place for this
+Socket :: union {
+	net.UDP_Socket,
+	Interception_Socket,
+}
