@@ -215,11 +215,18 @@ process_send_stream :: proc(send_stream: ^Send_Stream) {
 	for packet_bytes in queue.pop_front_safe(&send_stream.queue) {
 
 		log.info("len(packet_bytes): ", len(packet_bytes))
-		bytes_written, err := net.send_udp(send_stream.socket, packet_bytes, send_stream.endpoint)
 
-		assert(err == nil)
-		if err != nil {
-			log.error("Error when calling 'net.send_udp': ", err)
+		bytes_written, err := send_packet(send_stream.socket, packet_bytes, send_stream.endpoint)
+
+		switch socket_err in err {
+		case net.Network_Error:
+			assert(socket_err == nil)
+			if socket_err != nil {
+				log.error("Error when calling 'net.send_udp': ", socket_err)
+			}
+		case Interception_Socket_Error:
+			// TODO(Thomas): What to do here?
+			log.error("")
 		}
 	}
 

@@ -1,6 +1,7 @@
 package protocol
 
 import queue "core:container/queue"
+import "core:log"
 import "core:net"
 
 // The idea for the interception "system" is to mimic packet loss, out-of-order packets
@@ -47,7 +48,7 @@ Duplicated_Packet :: struct {
 }
 
 Interception_Socket :: struct {
-	incoming_queue:     queue.Queue([]u8),
+	packet_queue:       queue.Queue([]u8),
 	dropped_packets:    [dynamic][]u8,
 	lagged_packets:     [dynamic][]Lagged_Packet,
 	corrupted_packets:  [dynamic]Corrupted_Packet,
@@ -55,14 +56,40 @@ Interception_Socket :: struct {
 	outgoing_queue:     queue.Queue([]u8),
 }
 
-send_interception :: proc(socket: Interception_Socket, buf: []byte) -> int {
-	// Take a incoming packet and apply an effect.
+// Emulates the sending onto a network socket by pushing onto the packet queue.
+// Returns the len of the byte buffer passed in 
+send_interception :: proc(socket: ^Interception_Socket, buf: []byte) -> (int, bool) {
+	ok, err := queue.push_back(&socket.packet_queue, buf)
+
+	if err != nil {
+		log.error("failed to push onto interception packet queue: ", err)
+		return 0, false
+	}
+
+	return len(buf), ok
+}
+
+// Take a packet from the packet queue and apply an effect on it.
+process_interception_packet :: proc(socket: ^Interception_Socket) {
+
+	// The incoming queue is assumed to be FIFO, to preserve the order that it
+	// is written onto the queue, so we need to pop the front, since we're pushing
+	// onto the back.
+	item, ok := queue.pop_front_safe(&socket.packet_queue)
+	if !ok {
+		log.info("incoming queue is empty")
+		return
+	}
+
 	// For the drop effect we need to keep track of which packet / sequence that is dropped
+
+
 	// For the lag effect, we need to store the packet in another buffer / queue until the lag effect is over
 	// For the corruption we need to keep track of the original contents before corrupting
 	// For duplicate we need to keep track of which packet / sequence the orignal was.
-	return 14
+
 }
+
 
 drop_packet :: proc(socket: ^Interception_Socket) {}
 
@@ -78,20 +105,34 @@ send_packet :: proc(
 	endpoint: net.Endpoint,
 ) -> (
 	bytes_written: int,
-	err: net.Network_Error,
+	err: Socket_Error,
 ) {
-	switch sock in socket {
+	switch &sock in socket {
 	case net.UDP_Socket:
 		return net.send_udp(sock, buf, endpoint)
 	case Interception_Socket:
-		bytes := send_interception(sock, buf)
+		bytes, ok := send_interception(&sock, buf)
+
+		// We return a UDP_Send_Error here to try to mimic the real counterpart
+		if !ok {
+			return 0, Interception_Socket_Error{}
+		}
+
 		return bytes, nil
+	case:
+		return 0, nil
 	}
-	return 0, nil
 }
 
 // TODO(Thomas): Find a better place for this
 Socket :: union {
 	net.UDP_Socket,
 	Interception_Socket,
+}
+
+Interception_Socket_Error :: struct {}
+
+Socket_Error :: union {
+	net.Network_Error,
+	Interception_Socket_Error,
 }
