@@ -117,6 +117,10 @@ recv_socket_packet :: proc(socket: Socket, buf: []byte) -> (int, net.Endpoint, S
 	case Interception_Socket:
 		buf, ok := recv_interception(&sock)
 		if !ok {
+			// TODO(Thomas): The only "error" we can have here is that we don't have any packets
+			// left on the queue. This is not an error though, it should be treated the same we do
+			// with UDP_Recv_Error.Would_Block. We should just continue trying to consume the queue
+			// until we finish.
 			return 0, net.Endpoint{}, Interception_Socket_Error{}
 		}
 
