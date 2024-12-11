@@ -28,32 +28,9 @@ Effect :: enum {
 	Duplicate,
 }
 
-Lagged_Packet :: struct {
-	data: []u8,
-	// This is the number of packets that needs to be sent before this is sent.
-	// This makes it easier for now, arguably time is more realistic, but that would
-	// comes with a lot of issues too.
-	lag:  int,
-}
-
-Corrupted_Packet :: struct {
-	original: []u8,
-	mutated:  []u8,
-}
-
-Duplicated_Packet :: struct {
-	data:         []u8,
-	original_seq: u16,
-	duplicated:   u16,
-}
 
 Interception_Socket :: struct {
-	packet_queue:       queue.Queue([]u8),
-	dropped_packets:    [dynamic][]u8,
-	lagged_packets:     [dynamic][]Lagged_Packet,
-	corrupted_packets:  [dynamic]Corrupted_Packet,
-	duplicated_packets: [dynamic]Duplicated_Packet,
-	outgoing_queue:     queue.Queue([]u8),
+	packet_queue: queue.Queue([]u8),
 }
 
 // Emulates the sending onto a network socket by pushing onto the packet queue.
@@ -90,6 +67,15 @@ process_interception_packet :: proc(socket: ^Interception_Socket) {
 
 }
 
+recv_interception :: proc(socket: ^Interception_Socket) -> ([]byte, bool) {
+	// Pop off packet from the outgoing queue
+	packet, ok := queue.pop_front_safe(&socket.packet_queue)
+	if !ok {
+		log.info("incoming queue is empty")
+		return nil, false
+	}
+	return packet, ok
+}
 
 drop_packet :: proc(socket: ^Interception_Socket) {}
 
@@ -99,7 +85,7 @@ corrupt_packet :: proc(socket: ^Interception_Socket) {}
 
 duplicate_packet :: proc(socket: ^Interception_Socket) {}
 
-send_packet :: proc(
+send_socket_packet :: proc(
 	socket: Socket,
 	buf: []byte,
 	endpoint: net.Endpoint,
@@ -113,7 +99,6 @@ send_packet :: proc(
 	case Interception_Socket:
 		bytes, ok := send_interception(&sock, buf)
 
-		// We return a UDP_Send_Error here to try to mimic the real counterpart
 		if !ok {
 			return 0, Interception_Socket_Error{}
 		}
@@ -121,6 +106,29 @@ send_packet :: proc(
 		return bytes, nil
 	case:
 		return 0, nil
+	}
+}
+
+recv_socket_packet :: proc(socket: Socket, buf: []byte) -> (int, net.Endpoint, Socket_Error) {
+	switch &sock in socket {
+	case net.UDP_Socket:
+		bytes_read, remote_endpoint, err := net.recv_udp(sock, buf[:])
+		return bytes_read, remote_endpoint, err
+	case Interception_Socket:
+		buf, ok := recv_interception(&sock)
+		if !ok {
+			return 0, net.Endpoint{}, Interception_Socket_Error{}
+		}
+
+		bytes_read := len(buf)
+		remote_endpoint := net.Endpoint {
+			address = net.IP4_Address{127, 0, 0, 1},
+			port    = 8080,
+		}
+		err: net.Network_Error = nil
+		return bytes_read, remote_endpoint, err
+	case:
+		return 0, net.Endpoint{}, nil
 	}
 }
 
@@ -135,4 +143,13 @@ Interception_Socket_Error :: struct {}
 Socket_Error :: union {
 	net.Network_Error,
 	Interception_Socket_Error,
+}
+
+socket_close :: proc(socket: Socket) {
+	switch sock in socket {
+	case net.UDP_Socket:
+		net.close(sock)
+	case Interception_Socket:
+	// We don't really do anything here.
+	}
 }

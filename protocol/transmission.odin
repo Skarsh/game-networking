@@ -216,7 +216,11 @@ process_send_stream :: proc(send_stream: ^Send_Stream) {
 
 		log.info("len(packet_bytes): ", len(packet_bytes))
 
-		bytes_written, err := send_packet(send_stream.socket, packet_bytes, send_stream.endpoint)
+		bytes_written, err := send_socket_packet(
+			send_stream.socket,
+			packet_bytes,
+			send_stream.endpoint,
+		)
 
 		switch socket_err in err {
 		case net.Network_Error:
@@ -308,30 +312,38 @@ destroy_recv_stream :: proc(recv_stream: ^Recv_Stream) {
 // TODO(Thomas): Proper error handling, also something else needs
 // to call this continously
 recv_packet :: proc(recv_stream: ^Recv_Stream) -> bool {
-	bytes_read, remote_endpoint, recv_err := net.recv_udp(
+	bytes_read, remote_endpoint, err := recv_socket_packet(
 		recv_stream.socket,
 		recv_stream.net_packet_buf[:],
 	)
 
 	log.infof("recv packet --- bytes_read: %d, remote_endpoint: %v", bytes_read, remote_endpoint)
 
-	// TODO(Thomas): I'd prefer to somehow not have to do the check for OS like this.
-	when ODIN_OS == .Windows {
-		if recv_err != nil && recv_err != net.UDP_Recv_Error.Would_Block {
-			log.error("recv error: ", recv_err)
-			return false
+	switch recv_err in err {
+	case net.Network_Error:
+		// TODO(Thomas): I'd prefer to somehow not have to do the check for OS like this.
+		// TOOD(Thomas): Why is this different between Windows and Linux really?
+		when ODIN_OS == .Windows {
+			if recv_err != nil && recv_err != net.UDP_Recv_Error.Would_Block {
+				log.error("recv error: ", recv_err)
+				return false
+			}
+		} else when ODIN_OS == .Linux {
+			if recv_err != nil && recv_err != net.UDP_Recv_Error.Timeout {
+				log.error("recv error: ", recv_err)
+				return false
+			}
+		} else {
+			// Handle other operating systems or provide a default behavior
+			if recv_err != nil {
+				log.error("recv error: ", recv_err)
+				return false
+			}
 		}
-	} else when ODIN_OS == .Linux {
-		if recv_err != nil && recv_err != net.UDP_Recv_Error.Timeout {
-			log.error("recv error: ", recv_err)
-			return false
-		}
-	} else {
-		// Handle other operating systems or provide a default behavior
-		if recv_err != nil {
-			log.error("recv error: ", recv_err)
-			return false
-		}
+
+	case Interception_Socket_Error:
+		// TODO(Thomas): What to do here?
+		log.error("")
 	}
 
 	// TODO(Thomas): Return false or some error type here?
