@@ -1,5 +1,6 @@
 package protocol
 
+import "base:runtime"
 import queue "core:container/queue"
 import "core:log"
 import "core:net"
@@ -28,9 +29,39 @@ Effect :: enum {
 	Duplicate,
 }
 
+Socket_Type :: enum {
+	Interception,
+	UDP,
+}
 
 Interception_Socket :: struct {
 	packet_queue: queue.Queue([]u8),
+}
+
+create_socket :: proc(socket_type: Socket_Type, address: string, port: int) -> (Socket, bool) {
+	switch socket_type {
+	case .Interception:
+		socket := Interception_Socket{}
+		alloc_err := queue.init(&socket.packet_queue)
+		return socket, alloc_err == nil
+	case .UDP:
+		addr := net.parse_address(address)
+		socket, err := net.make_bound_udp_socket(addr, port)
+		return socket, err == nil
+	}
+	return Socket{}, false
+}
+
+set_socket_blocking :: proc(socket: Socket, blocking: bool) -> Socket_Error {
+	switch sock in socket {
+	case net.UDP_Socket:
+		blocking_err := net.set_blocking(sock, blocking)
+		return blocking_err
+	case Interception_Socket:
+		return nil
+	case:
+		return nil
+	}
 }
 
 // Emulates the sending onto a network socket by pushing onto the packet queue.

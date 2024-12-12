@@ -31,15 +31,14 @@ Packet_Data :: struct {
 Send_Stream :: struct {
 	allocator:        runtime.Allocator,
 	queue:            queue.Queue([]u8),
-	socket:           net.UDP_Socket,
+	socket:           Socket,
 	endpoint:         net.Endpoint,
 	current_sequence: u16,
 }
 
 create_send_stream :: proc(
 	allocator: runtime.Allocator,
-	address: string,
-	port: int,
+	socket: Socket,
 	endpoint_address: string,
 	endpoint_port: int,
 ) -> Send_Stream {
@@ -48,12 +47,6 @@ create_send_stream :: proc(
 	assert(alloc_err == .None)
 	if alloc_err != .None {
 		log.error("alloc error when init queue: ", alloc_err)
-	}
-
-	socket, socket_ok := create_udp_socket(address, port)
-	assert(socket_ok)
-	if !socket_ok {
-		log.error("failed to create udp socket")
 	}
 
 	endpoint_string := fmt.tprintf("%s:%d", endpoint_address, endpoint_port)
@@ -88,7 +81,7 @@ free_send_stream :: proc(send_stream: ^Send_Stream) {
 
 destroy_send_stream :: proc(send_stream: ^Send_Stream) {
 	free_send_stream(send_stream)
-	net.close(send_stream.socket)
+	socket_close(send_stream.socket)
 }
 
 // TODO(Thomas): Calculate crc32 properly
@@ -266,7 +259,7 @@ Recv_Stream :: struct {
 	persistent_allocator:   runtime.Allocator,
 	temp_allocator:         runtime.Allocator,
 	realtime_packet_buffer: ^Realtime_Packet_Buffer,
-	socket:                 net.UDP_Socket,
+	socket:                 Socket,
 	net_packet_buf:         [MTU]u8,
 }
 
@@ -277,23 +270,20 @@ recv_stream_free_temp_allocator :: proc(recv_stream: ^Recv_Stream) {
 create_recv_stream :: proc(
 	persistent_allocator: runtime.Allocator,
 	temp_allocator: runtime.Allocator,
-	address: string,
-	port: int,
+	socket: Socket,
 ) -> Recv_Stream {
 	realtime_packet_buffer := new(Realtime_Packet_Buffer, persistent_allocator)
 	for i in 0 ..< len(realtime_packet_buffer.entries) do realtime_packet_buffer.entries[i].sequence = ENTRY_SENTINEL_VALUE
 
-	socket, socket_ok := create_udp_socket(address, port)
-	assert(socket_ok)
-	if !socket_ok {
-		log.error("failed to create udp_socket")
-	}
+	err := set_socket_blocking(socket, false)
+	switch blocking_err in err {
+	case net.Network_Error:
+		if blocking_err != nil {
+			log.error("udp socket set blocking error: ", blocking_err)
+		}
+		assert(blocking_err == nil)
 
-	// make the socket non-blocking
-	blocking_err := net.set_blocking(socket, false)
-	assert(blocking_err == nil)
-	if blocking_err != nil {
-		log.error("udp socket set blocking error: ", blocking_err)
+	case Interception_Socket_Error:
 	}
 
 	return Recv_Stream {
@@ -306,7 +296,7 @@ create_recv_stream :: proc(
 
 destroy_recv_stream :: proc(recv_stream: ^Recv_Stream) {
 	free(recv_stream.realtime_packet_buffer, recv_stream.persistent_allocator)
-	net.close(recv_stream.socket)
+	socket_close(recv_stream.socket)
 }
 
 // TODO(Thomas): Proper error handling, also something else needs
@@ -701,7 +691,9 @@ create_udp_socket :: proc(address: string, port: int) -> (net.UDP_Socket, bool) 
 @(test)
 test_enqueue_packet :: proc(t: ^testing.T) {
 	allocator := context.allocator
-	send_stream := create_send_stream(allocator, "127.0.0.1", 8080, "127.0.0.1", 8081)
+	socket, socket_ok := create_socket(.UDP, "127.0.0.1", 8080)
+	testing.expect(t, socket_ok, "Creating socket should be ok")
+	send_stream := create_send_stream(allocator, socket, "127.0.0.1", 8081)
 	defer free_send_stream(&send_stream)
 
 	packet_data := []u8{1, 2, 3, 4, 5}
