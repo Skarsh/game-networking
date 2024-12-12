@@ -70,6 +70,7 @@ main :: proc() {
 
 	// TODO(Thomas): Split more of this functionality out
 	for {
+		free_all(context.temp_allocator)
 		test_packet := proto.random_test_packet(-1000, 1000)
 
 		test_packet_buffer: []u32
