@@ -3,6 +3,7 @@ package protocol
 import "base:runtime"
 import queue "core:container/queue"
 import "core:log"
+import "core:mem"
 import "core:net"
 
 // The idea for the interception "system" is to mimic packet loss, out-of-order packets
@@ -34,22 +35,31 @@ Socket_Type :: enum {
 	UDP,
 }
 
+interception_socket: Interception_Socket
+
 Interception_Socket :: struct {
 	packet_queue: queue.Queue([]u8),
+	initialized:  bool,
 }
 
 create_socket :: proc(socket_type: Socket_Type, address: string, port: int) -> (Socket, bool) {
 	switch socket_type {
 	case .Interception:
-		socket := Interception_Socket{}
-		alloc_err := queue.init(&socket.packet_queue)
-		return socket, alloc_err == nil
+		if !interception_socket.initialized {
+			alloc_err := queue.init(&interception_socket.packet_queue)
+			interception_socket.initialized = true
+			return interception_socket, alloc_err == nil
+		} else {
+			return interception_socket, true
+		}
+
 	case .UDP:
 		addr := net.parse_address(address)
 		socket, err := net.make_bound_udp_socket(addr, port)
 		return socket, err == nil
+	case:
+		return Socket{}, false
 	}
-	return Socket{}, false
 }
 
 set_socket_blocking :: proc(socket: Socket, blocking: bool) -> Socket_Error {
@@ -67,14 +77,19 @@ set_socket_blocking :: proc(socket: Socket, blocking: bool) -> Socket_Error {
 // Emulates the sending onto a network socket by pushing onto the packet queue.
 // Returns the len of the byte buffer passed in 
 send_interception :: proc(socket: ^Interception_Socket, buf: []byte) -> (int, bool) {
-	ok, err := queue.push_back(&socket.packet_queue, buf)
+
+	// Copying here is necessary since the sending side will eventually free this memeory
+	// so to be able to properly manage it on our interception side we need to copy it.
+	copied_buf := make([]byte, len(buf))
+	mem.copy(&copied_buf[0], &buf[0], len(buf))
+	ok, err := queue.push_front(&socket.packet_queue, copied_buf)
 
 	if err != nil {
 		log.error("failed to push onto interception packet queue: ", err)
 		return 0, false
 	}
 
-	return len(buf), ok
+	return len(copied_buf), ok
 }
 
 // Take a packet from the packet queue and apply an effect on it.
@@ -98,6 +113,7 @@ process_interception_packet :: proc(socket: ^Interception_Socket) {
 
 }
 
+// TODO(Thomas): What about copying the memory out here?
 recv_interception :: proc(socket: ^Interception_Socket) -> ([]byte, bool) {
 	// Pop off packet from the outgoing queue
 	packet, ok := queue.pop_front_safe(&socket.packet_queue)
