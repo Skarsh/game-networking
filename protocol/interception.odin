@@ -113,7 +113,6 @@ process_interception_packet :: proc(socket: ^Interception_Socket) {
 
 }
 
-// TODO(Thomas): What about copying the memory out here?
 recv_interception :: proc(socket: ^Interception_Socket) -> ([]byte, bool) {
 	// Pop off packet from the outgoing queue
 	packet, ok := queue.pop_front_safe(&socket.packet_queue)
@@ -162,7 +161,8 @@ recv_socket_packet :: proc(socket: Socket, buf: []byte) -> (int, net.Endpoint, S
 		bytes_read, remote_endpoint, err := net.recv_udp(sock, buf[:])
 		return bytes_read, remote_endpoint, err
 	case Interception_Socket:
-		buf, ok := recv_interception(&sock)
+		recv_buf, ok := recv_interception(&sock)
+
 		if !ok {
 			// TODO(Thomas): The only "error" we can have here is that we don't have any packets
 			// left on the queue. This is not an error though, it should be treated the same we do
@@ -171,14 +171,20 @@ recv_socket_packet :: proc(socket: Socket, buf: []byte) -> (int, net.Endpoint, S
 			return 0, net.Endpoint{}, Interception_Socket_Error{}
 		}
 
+		assert(
+			len(recv_buf) <= len(buf),
+			"recv buffer is larger than the buffer we're copying bytes into",
+		)
+		mem.copy(&buf[0], &recv_buf[0], len(recv_buf))
+
+
 		bytes_read := len(buf)
 		remote_endpoint := net.Endpoint {
 			address = net.IP4_Address{127, 0, 0, 1},
 			port    = 8080,
 		}
 		err: net.Network_Error = nil
-		return bytes_read, remote_endpoint, err
-	case:
+		return bytes_read, remote_endpoint, err;case:
 		return 0, net.Endpoint{}, nil
 	}
 }
