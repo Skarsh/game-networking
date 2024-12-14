@@ -184,7 +184,8 @@ recv_socket_packet :: proc(socket: Socket, buf: []byte) -> (int, net.Endpoint, S
 			port    = 8080,
 		}
 		err: net.Network_Error = nil
-		return bytes_read, remote_endpoint, err;case:
+		return bytes_read, remote_endpoint, err
+	case:
 		return 0, net.Endpoint{}, nil
 	}
 }
