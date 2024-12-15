@@ -41,14 +41,14 @@ main :: proc() {
 	recv_arena_allocator := virtual.arena_allocator(&recv_arena)
 	defer delete(recv_arena_buffer)
 
-	recv_socket, recv_socket_ok := proto.create_socket(.UDP, "127.0.0.1", 8001)
-	if !recv_socket_ok {
+	socket, socket_ok := proto.create_socket(.UDP, "127.0.0.1", 8000, 8001)
+	if !socket_ok {
 		log.error("Creating socket failed")
 		return
 	}
 
 	// TODO(Thomas): Pass in the Arena instead
-	recv_stream := proto.create_recv_stream(context.allocator, recv_arena_allocator, recv_socket)
+	recv_stream := proto.create_recv_stream(context.allocator, recv_arena_allocator, &socket)
 	defer proto.destroy_recv_stream(&recv_stream)
 
 	send_arena := virtual.Arena{}
@@ -58,14 +58,8 @@ main :: proc() {
 	send_arena_allocator := virtual.arena_allocator(&send_arena)
 	defer delete(send_arena_buffer)
 
-	send_socket, send_socket_ok := proto.create_socket(.UDP, "127.0.0.1", 8000)
-	if !send_socket_ok {
-		log.error("Creating socket failed")
-		return
-	}
-
 	// TODO(Thomas): Pass in the Arena instead
-	send_stream := proto.create_send_stream(send_arena_allocator, send_socket, "127.0.0.1", 8001)
+	send_stream := proto.create_send_stream(send_arena_allocator, &socket, "127.0.0.1", 8001)
 	defer proto.destroy_send_stream(&send_stream)
 
 	// TODO(Thomas): Split more of this functionality out
@@ -158,7 +152,6 @@ main :: proc() {
 			if !des_test_packet_ok do log.error("failed to deserialize test packet b")
 			assert(des_test_packet_ok)
 		}
-
 
 		assert(des_test_packet == test_packet)
 	}

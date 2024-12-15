@@ -35,44 +35,53 @@ Socket_Type :: enum {
 	UDP,
 }
 
-interception_socket: Interception_Socket
-
 Interception_Socket :: struct {
 	packet_queue: queue.Queue([]u8),
-	initialized:  bool,
 }
 
-create_socket :: proc(socket_type: Socket_Type, address: string, port: int) -> (Socket, bool) {
+UDP_Socket :: struct {
+	send: net.UDP_Socket,
+	recv: net.UDP_Socket,
+}
+
+create_socket :: proc(
+	socket_type: Socket_Type,
+	address: string,
+	send_port: int,
+	recv_port: int,
+) -> (
+	Socket,
+	bool,
+) {
 	switch socket_type {
 	case .Interception:
-		if !interception_socket.initialized {
-			alloc_err := queue.init(&interception_socket.packet_queue)
-			interception_socket.initialized = true
-			return interception_socket, alloc_err == nil
-		} else {
-			return interception_socket, true
-		}
-
+		interception_socket := Interception_Socket{}
+		alloc_err := queue.init(&interception_socket.packet_queue)
+		return interception_socket, alloc_err == nil
 	case .UDP:
 		addr := net.parse_address(address)
-		socket, err := net.make_bound_udp_socket(addr, port)
-		return socket, err == nil
+		send_socket, send_err := net.make_bound_udp_socket(addr, send_port)
+		if send_err != nil {
+			return UDP_Socket{}, false
+		}
+
+		recv_socket, recv_err := net.make_bound_udp_socket(addr, recv_port)
+		if recv_err != nil {
+			return UDP_Socket{}, false
+		}
+
+		blocking_err := net.set_blocking(recv_socket, false)
+
+		udp_socket := UDP_Socket {
+			send = send_socket,
+			recv = recv_socket,
+		}
+		return udp_socket, true
 	case:
 		return Socket{}, false
 	}
 }
 
-set_socket_blocking :: proc(socket: Socket, blocking: bool) -> Socket_Error {
-	switch sock in socket {
-	case net.UDP_Socket:
-		blocking_err := net.set_blocking(sock, blocking)
-		return blocking_err
-	case Interception_Socket:
-		return nil
-	case:
-		return nil
-	}
-}
 
 // Emulates the sending onto a network socket by pushing onto the packet queue.
 // Returns the len of the byte buffer passed in 
@@ -132,16 +141,16 @@ corrupt_packet :: proc(socket: ^Interception_Socket) {}
 duplicate_packet :: proc(socket: ^Interception_Socket) {}
 
 send_socket_packet :: proc(
-	socket: Socket,
+	socket: ^Socket,
 	buf: []byte,
 	endpoint: net.Endpoint,
 ) -> (
 	bytes_written: int,
 	err: Socket_Error,
 ) {
-	switch &sock in socket {
-	case net.UDP_Socket:
-		return net.send_udp(sock, buf, endpoint)
+	switch &sock in socket^ {
+	case UDP_Socket:
+		return net.send_udp(sock.send, buf, endpoint)
 	case Interception_Socket:
 		bytes, ok := send_interception(&sock, buf)
 
@@ -155,10 +164,10 @@ send_socket_packet :: proc(
 	}
 }
 
-recv_socket_packet :: proc(socket: Socket, buf: []byte) -> (int, net.Endpoint, Socket_Error) {
-	switch &sock in socket {
-	case net.UDP_Socket:
-		bytes_read, remote_endpoint, err := net.recv_udp(sock, buf[:])
+recv_socket_packet :: proc(socket: ^Socket, buf: []byte) -> (int, net.Endpoint, Socket_Error) {
+	switch &sock in socket^ {
+	case UDP_Socket:
+		bytes_read, remote_endpoint, err := net.recv_udp(sock.recv, buf[:])
 		return bytes_read, remote_endpoint, err
 	case Interception_Socket:
 		recv_buf, ok := recv_interception(&sock)
@@ -192,7 +201,7 @@ recv_socket_packet :: proc(socket: Socket, buf: []byte) -> (int, net.Endpoint, S
 
 // TODO(Thomas): Find a better place for this
 Socket :: union {
-	net.UDP_Socket,
+	UDP_Socket,
 	Interception_Socket,
 }
 
@@ -203,10 +212,12 @@ Socket_Error :: union {
 	Interception_Socket_Error,
 }
 
+// TODO(Thomas): More finegrained handling here on the UDP socket side???
 socket_close :: proc(socket: Socket) {
 	switch sock in socket {
-	case net.UDP_Socket:
-		net.close(sock)
+	case UDP_Socket:
+		net.close(sock.send)
+		net.close(sock.recv)
 	case Interception_Socket:
 	// We don't really do anything here.
 	}
