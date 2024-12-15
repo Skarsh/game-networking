@@ -82,7 +82,7 @@ send_interception :: proc(socket: ^Interception_Socket, buf: []byte) -> (int, bo
 	// so to be able to properly manage it on our interception side we need to copy it.
 	copied_buf := make([]byte, len(buf))
 	mem.copy(&copied_buf[0], &buf[0], len(buf))
-	ok, err := queue.push_front(&socket.packet_queue, copied_buf)
+	ok, err := queue.push_back(&socket.packet_queue, copied_buf)
 
 	if err != nil {
 		log.error("failed to push onto interception packet queue: ", err)
