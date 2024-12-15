@@ -205,9 +205,11 @@ Socket :: union {
 	Interception_Socket,
 }
 
-Interception_Socket_Error :: struct {}
+Interception_Socket_Error :: enum {
+	None = 0,
+}
 
-Socket_Error :: union {
+Socket_Error :: union #shared_nil {
 	net.Network_Error,
 	Interception_Socket_Error,
 }
