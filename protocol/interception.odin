@@ -3,6 +3,7 @@ package protocol
 import "base:runtime"
 import queue "core:container/queue"
 import "core:log"
+import "core:math/rand"
 import "core:mem"
 import "core:net"
 
@@ -35,8 +36,15 @@ Socket_Type :: enum {
 	UDP,
 }
 
+Interception_Probabilities :: struct {
+	drop: f32,
+}
+
 Interception_Socket :: struct {
-	packet_queue: queue.Queue([]u8),
+	probabilities:   Interception_Probabilities,
+	packet_queue:    queue.Queue([]u8),
+	dropped_packets: [dynamic][]u8,
+	outgoing_queue:  queue.Queue([]u8),
 }
 
 UDP_Socket :: struct {
@@ -44,28 +52,48 @@ UDP_Socket :: struct {
 	recv: net.UDP_Socket,
 }
 
-create_socket :: proc(
-	socket_type: Socket_Type,
-	address: string,
+UDP_Config :: struct {
+	address:   string,
 	send_port: int,
 	recv_port: int,
-) -> (
-	Socket,
-	bool,
-) {
-	switch socket_type {
-	case .Interception:
-		interception_socket := Interception_Socket{}
-		alloc_err := queue.init(&interception_socket.packet_queue)
-		return interception_socket, alloc_err == nil
-	case .UDP:
-		addr := net.parse_address(address)
-		send_socket, send_err := net.make_bound_udp_socket(addr, send_port)
+}
+
+Interception_Config :: struct {
+	probabilities: Interception_Probabilities,
+}
+
+Socket_Config :: union {
+	Interception_Config,
+	UDP_Config,
+}
+
+create_socket :: proc(config: Socket_Config) -> (Socket, bool) {
+	switch conf in config {
+	case Interception_Config:
+		interception_socket := Interception_Socket {
+			probabilities = conf.probabilities,
+		}
+		packet_queue_alloc_err := queue.init(&interception_socket.packet_queue)
+
+		if packet_queue_alloc_err != nil {
+			return Interception_Socket{}, false
+		}
+
+		outgoing_queue_alloc_err := queue.init(&interception_socket.outgoing_queue)
+
+		if outgoing_queue_alloc_err != nil {
+			return Interception_Socket{}, false
+		}
+
+		return interception_socket, true
+	case UDP_Config:
+		addr := net.parse_address(conf.address)
+		send_socket, send_err := net.make_bound_udp_socket(addr, conf.send_port)
 		if send_err != nil {
 			return UDP_Socket{}, false
 		}
 
-		recv_socket, recv_err := net.make_bound_udp_socket(addr, recv_port)
+		recv_socket, recv_err := net.make_bound_udp_socket(addr, conf.recv_port)
 		if recv_err != nil {
 			return UDP_Socket{}, false
 		}
@@ -107,11 +135,26 @@ process_interception_packet :: proc(socket: ^Interception_Socket) {
 	// The incoming queue is assumed to be FIFO, to preserve the order that it
 	// is written onto the queue, so we need to pop the front, since we're pushing
 	// onto the back.
-	item, ok := queue.pop_front_safe(&socket.packet_queue)
-	if !ok {
+	packet_bytes, pop_ok := queue.pop_front_safe(&socket.packet_queue)
+	if !pop_ok {
 		log.info("incoming queue is empty")
 		return
 	}
+
+	packet_reader := create_reader(convert_byte_slice_to_word_slice(packet_bytes))
+	packet, packet_ok := deserialize_packet(&packet_reader, context.allocator)
+	assert(packet_ok, "failed to deserialize packet")
+
+	drop := rand.float32()
+	if drop < socket.probabilities.drop {
+		log.info("dropping packet")
+		append(&socket.dropped_packets, packet_bytes)
+	} else {
+		push_ok, alloc_err := queue.push_back(&socket.outgoing_queue, packet_bytes)
+		assert(push_ok, "failed to push onto the outgoing queue")
+		assert(alloc_err == nil)
+	}
+
 
 	// For the drop effect we need to keep track of which packet / sequence that is dropped
 
@@ -123,8 +166,11 @@ process_interception_packet :: proc(socket: ^Interception_Socket) {
 }
 
 recv_interception :: proc(socket: ^Interception_Socket) -> ([]byte, bool) {
-	// Pop off packet from the outgoing queue
-	packet, ok := queue.pop_front_safe(&socket.packet_queue)
+
+	//TODO(Thomas) Process the interception packet somewhere else??
+	process_interception_packet(socket)
+
+	packet, ok := queue.pop_front_safe(&socket.outgoing_queue)
 	if !ok {
 		log.info("incoming queue is empty")
 		return nil, false

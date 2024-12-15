@@ -41,7 +41,15 @@ main :: proc() {
 	recv_arena_allocator := virtual.arena_allocator(&recv_arena)
 	defer delete(recv_arena_buffer)
 
-	socket, socket_ok := proto.create_socket(.UDP, "127.0.0.1", 8000, 8001)
+	//socket_config := proto.UDP_Config {
+	//	address   = "127.0.0.1",
+	//	send_port = 8000,
+	//	recv_port = 8001,
+	//}
+	socket_config := proto.Interception_Config {
+		probabilities = proto.Interception_Probabilities{drop = 0.75},
+	}
+	socket, socket_ok := proto.create_socket(socket_config)
 	if !socket_ok {
 		log.error("Creating socket failed")
 		return

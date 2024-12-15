@@ -680,7 +680,12 @@ create_udp_socket :: proc(address: string, port: int) -> (net.UDP_Socket, bool) 
 @(test)
 test_enqueue_packet :: proc(t: ^testing.T) {
 	allocator := context.allocator
-	socket, socket_ok := create_socket(.UDP, "127.0.0.1", 8080, 8081)
+	socket_config := UDP_Config {
+		address   = "127.0.0.1",
+		send_port = 8080,
+		recv_port = 8081,
+	}
+	socket, socket_ok := create_socket(socket_config)
 	testing.expect(t, socket_ok, "Creating socket should be ok")
 	send_stream := create_send_stream(allocator, &socket, "127.0.0.1", 8081)
 	defer free_send_stream(&send_stream)
